@@ -9,9 +9,6 @@ from db.database import get_db
 
 router = APIRouter(prefix="/pages", tags=["pages"])
 
-# ponytail: hard cap of stored versions per page, trimmed oldest-first
-MAX_VERSIONS_PER_PAGE = 50
-
 
 class PageIn(BaseModel):
     name: str = Field(default="Untitled", min_length=1, max_length=120)
@@ -91,66 +88,7 @@ async def save_snapshot(
         {"_id": page["_id"]},
         {"$set": {"snapshot": body.snapshot, "updated_at": now}},
     )
-    await db.page_versions.insert_one(
-        {
-            "_id": uuid.uuid4().hex,
-            "page_id": page["_id"],
-            "user_id": user["id"],
-            "snapshot": body.snapshot,
-            "created_at": now,
-        }
-    )
-
-    # Trim history beyond the cap, oldest first.
-    overflow = []
-    async for doc in (
-        db.page_versions.find({"page_id": page["_id"]}, {"_id": 1})
-        .sort("created_at", -1)
-        .skip(MAX_VERSIONS_PER_PAGE)
-    ):
-        overflow.append(doc["_id"])
-    if overflow:
-        await db.page_versions.delete_many({"_id": {"$in": overflow}})
-
     return {"saved_at": _iso(now)}
-
-
-@router.get("/{page_id}/history")
-async def page_history(
-    page_id: str, user: dict = Depends(get_current_user), db=Depends(get_db)
-):
-    await _owned_page(db, page_id, user["id"])
-    versions = []
-    async for doc in (
-        db.page_versions.find({"page_id": page_id}, {"created_at": 1})
-        .sort("created_at", -1)
-        .limit(20)
-    ):
-        versions.append({"id": doc["_id"], "created_at": _iso(doc.get("created_at"))})
-    return {"versions": versions}
-
-
-@router.post("/{page_id}/history/{version_id}/restore")
-async def restore_version(
-    page_id: str,
-    version_id: str,
-    user: dict = Depends(get_current_user),
-    db=Depends(get_db),
-):
-    await _owned_page(db, page_id, user["id"])
-    version = await db.page_versions.find_one(
-        {"_id": version_id, "page_id": page_id, "user_id": user["id"]}
-    )
-    if not version:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Version not found")
-
-    now = datetime.now(timezone.utc)
-    await db.pages.update_one(
-        {"_id": page_id},
-        {"$set": {"snapshot": version["snapshot"], "updated_at": now}},
-    )
-    page = await db.pages.find_one({"_id": page_id})
-    return {"page": _page_out(page, with_snapshot=True)}
 
 
 @router.patch("/{page_id}")

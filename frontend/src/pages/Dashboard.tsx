@@ -80,7 +80,7 @@ export default function Dashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Recent pages</CardTitle>
+                <CardTitle>Recent workspaces</CardTitle>
                 <CardDescription>Pick up where you left off</CardDescription>
               </div>
               <Button asChild variant="outline" size="sm">
@@ -93,7 +93,7 @@ export default function Dashboard() {
           <CardContent>
             {recentPages.length === 0 ? (
               <p className="text-muted-foreground py-4 text-center text-sm">
-                No pages yet — open the workspace to start thinking.
+                No workspaces yet — open the workspace to start thinking.
               </p>
             ) : (
               <ul className="divide-y">

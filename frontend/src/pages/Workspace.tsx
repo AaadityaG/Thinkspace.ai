@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { History, Pencil, Plus, RotateCcw, X } from 'lucide-react'
+import { Pencil, Plus, X } from 'lucide-react'
 import { Editor, Tldraw } from 'tldraw'
 import 'tldraw/tldraw.css'
 
@@ -10,11 +10,9 @@ import { errorMessage } from '@/services/authApi'
 import {
   useCreatePageMutation,
   useDeletePageMutation,
-  useGetPageHistoryQuery,
   useGetPageQuery,
   useGetPagesQuery,
   useRenamePageMutation,
-  useRestoreVersionMutation,
   useSaveSnapshotMutation,
   type PageSummary,
 } from '@/services/pagesApi'
@@ -33,7 +31,6 @@ export default function Workspace() {
   const [deletePage] = useDeletePageMutation()
   const [renamePage] = useRenamePageMutation()
   const [saveSnapshot] = useSaveSnapshotMutation()
-  const [restoreVersion] = useRestoreVersionMutation()
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -137,24 +134,6 @@ export default function Workspace() {
     }
   }
 
-  const handleRestore = ({
-    id,
-    versionId,
-  }: {
-    id: string
-    versionId: string
-  }) => {
-    restoreVersion({ id, versionId })
-      .unwrap()
-      .then((res) => {
-        if (res.page.snapshot) {
-          snapCacheRef.current.set(id, res.page.snapshot as Snapshot)
-          loadedJsonRef.current = ''
-        }
-      })
-      .catch(() => {})
-  }
-
   const handleSelectPage = (id: string) => {
     if (id === activeIdRef.current) return
     flushSave()
@@ -235,7 +214,7 @@ export default function Workspace() {
       {/* Pages panel */}
       <aside className="flex w-64 shrink-0 flex-col rounded-lg border">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-medium">Pages</span>
+          <span className="text-sm font-medium">Workspaces</span>
           <Button
             size="sm"
             variant="outline"
@@ -285,6 +264,7 @@ export default function Workspace() {
                   </button>
                   <Button
                     aria-label={`Rename ${page.name}`}
+
                     size="icon"
                     variant="ghost"
                     className="size-7 opacity-0 group-hover:opacity-100"
@@ -306,53 +286,13 @@ export default function Workspace() {
             </div>
           ))}
           {pages.length === 0 && (
-            <p className="px-3 py-4 text-xs text-muted-foreground">No pages yet</p>
+            <p className="px-3 py-4 text-xs text-muted-foreground">
+              No workspaces yet
+            </p>
           )}
         </div>
-
-        {activeId && <HistorySection pageId={activeId} onRestore={handleRestore} />}
       </aside>
       </div>
     </AppShell>
-  )
-}
-
-function HistorySection({
-  pageId,
-  onRestore,
-}: {
-  pageId: string
-  onRestore: (args: { id: string; versionId: string }) => void
-}) {
-  const { data } = useGetPageHistoryQuery(pageId)
-  const versions = data?.versions ?? []
-
-  return (
-    <details className="border-t">
-      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium">
-        <History className="size-4" /> History ({versions.length})
-      </summary>
-      <div className="max-h-48 overflow-y-auto pb-2">
-        {versions.length === 0 && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">No saved versions yet</p>
-        )}
-        {versions.map((version, i) => (
-          <div key={version.id} className="flex items-center gap-2 px-3 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {i === 0 ? 'Latest · ' : ''}
-              {formatWhen(version.created_at)}
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={i === 0}
-              onClick={() => onRestore({ id: pageId, versionId: version.id })}
-            >
-              <RotateCcw /> Restore
-            </Button>
-          </div>
-        ))}
-      </div>
-    </details>
   )
 }
