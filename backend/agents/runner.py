@@ -18,11 +18,18 @@ def get_runner() -> InMemoryRunner:
 
 
 async def stream_chat(
-    message: str, user_id: str, session_id: str
+    message: str,
+    user_id: str,
+    session_id: str,
+    model: str | None = None,
 ) -> AsyncIterator[tuple[str, dict | str]]:
     """Yield ('cmd', canvas_command) as the agent calls tools, then ('text', reply)
     once the final response lands. Sessions persist per (app, user, session_id),
     so pass the same id across calls to keep conversation history."""
+    if model:
+        # ponytail: global model swap — fine for single-user demo flow; per-user
+        # agents if concurrent multi-tenant use ever matters.
+        root_agent.model = model
     runner = get_runner()
     session = await runner.session_service.get_session(
         app_name=APP_NAME, user_id=user_id, session_id=session_id

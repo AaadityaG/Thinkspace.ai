@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   createShapeId,
+  renderPlaintextFromRichText,
   toRichText,
   type Editor,
+  type TLRichText,
   type TLShapeId,
 } from 'tldraw'
 
@@ -151,6 +153,57 @@ function executeCommands(
   }
 }
 
+// Compact canvas description shipped with every chat message so the agent
+// can see what's already drawn. Aliases (n1, n2…) are how the agent refers
+// back to existing shapes.
+function summarizeCanvas(editor: Editor): {
+  text: string
+  ids: Map<string, TLShapeId>
+} | null {
+  const shapes = editor.getCurrentPageShapes()
+  const lines: string[] = []
+  const aliasOf = new Map<TLShapeId, string>()
+  const ids = new Map<string, TLShapeId>()
+  for (const shape of shapes) {
+    if (lines.length >= 60) break
+    if (shape.type !== 'geo' && shape.type !== 'note' && shape.type !== 'text')
+      continue
+    const richText = (shape.props as { richText?: TLRichText }).richText
+    const label = richText
+      ? renderPlaintextFromRichText(editor, richText)
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 80)
+      : ''
+    const alias = `n${lines.length + 1}`
+    aliasOf.set(shape.id, alias)
+    ids.set(alias, shape.id)
+    if (label) ids.set(label, shape.id)
+    const pos = `at (${Math.round(shape.x)},${Math.round(shape.y)})`
+    lines.push(
+      `${alias} ${shape.type}${label ? ` "${label}"` : ''} ${pos}`,
+    )
+  }
+  if (!lines.length) return null
+
+  const edges: string[] = []
+  for (const shape of shapes) {
+    if (shape.type !== 'arrow') continue
+    const bindings = editor.getBindingsFromShape(shape.id, 'arrow')
+    const from = bindings.find((b) => b.props.terminal === 'start')?.toId
+    const to = bindings.find((b) => b.props.terminal === 'end')?.toId
+    const fa = from ? aliasOf.get(from) : undefined
+    const ta = to ? aliasOf.get(to) : undefined
+    if (fa && ta) edges.push(`${fa}->${ta}`)
+  }
+
+  const text =
+    `[CANVAS STATE]\n` +
+    lines.join('\n') +
+    (edges.length ? `\nedges: ${edges.join(', ')}` : '')
+  return { text, ids }
+}
+
 // Reads the backend's NDJSON stream, executing each canvas command the
 // instant it arrives so shapes appear live while the agent is still working.
 async function* ndjsonEvents(
@@ -172,6 +225,17 @@ async function* ndjsonEvents(
   if (buffer.trim()) yield JSON.parse(buffer)
 }
 
+const FALLBACK_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.5-flash-lite',
+  'gemini-pro-latest',
+]
+const MODEL_KEY = 'thinkspace-model'
+
 export function AgentChatPanel({
   activeId,
   editorRef,
@@ -183,11 +247,23 @@ export function AgentChatPanel({
   const [progress, setProgress] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [open, setOpen] = useState(true)
+  const [models, setModels] = useState<string[]>(FALLBACK_MODELS)
+  const [model, setModel] = useState(
+    () => localStorage.getItem(MODEL_KEY) || '',
+  )
+
+  useEffect(() => {
+    fetch('/api/agents/models', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d?.models && setModels(d.models))
+      .catch(() => {})
+  }, [])
 
   // Thread + label map per workspace, so switching canvases keeps context.
   const threadsRef = useRef(new Map<string, Msg[]>())
   const labelsRef = useRef(new Map<string, LabelMap>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const thread = (activeId ? threadsRef.current.get(activeId) : null) ?? []
   const setThread = (msgs: Msg[]) => {
@@ -199,6 +275,8 @@ export function AgentChatPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [activeId])
 
+  const stop = () => abortRef.current?.abort()
+
   const send = async () => {
     const message = input.trim()
     if (!message || !activeId || isLoading) return
@@ -209,20 +287,32 @@ export function AgentChatPanel({
     setThread(msgs)
     let reply = ''
     try {
+      // Give the agent eyes: summarize the canvas and seed the executor's
+      // alias map so its commands can reference existing shapes.
+      let canvas: string | undefined
+      const editor = editorRef.current
+      if (editor) {
+        const summary = summarizeCanvas(editor)
+        if (summary) {
+          canvas = summary.text
+          let labels = labelsRef.current.get(activeId) ?? new Map()
+          for (const [alias, id] of summary.ids) labels.set(alias, id)
+          labelsRef.current.set(activeId, labels)
+        }
+      }
+
+      const controller = new AbortController()
+      abortRef.current = controller
       const res = await fetch('/api/agents/chat', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, page_id: activeId }),
+        body: JSON.stringify({ message, page_id: activeId, canvas, model }),
+        signal: controller.signal,
       })
       if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`)
 
-      const editor = editorRef.current
-      let labels = editor ? labelsRef.current.get(activeId) : undefined
-      if (editor && !labels) {
-        labels = new Map()
-        labelsRef.current.set(activeId, labels)
-      }
+      const labels = editor ? labelsRef.current.get(activeId) : undefined
       // Anchor auto-placement to where the user is looking right now.
       const vp = editor?.getViewportPageBounds()
       const p = { col: 0, row: 0 }
@@ -252,11 +342,19 @@ export function AgentChatPanel({
       }
       msgs = [...msgs, { role: 'agent', content: reply }]
     } catch (err) {
-      msgs = [
-        ...msgs,
-        { role: 'agent', content: `Error: ${errorMessage(err)}` },
-      ]
+      if ((err as Error)?.name === 'AbortError') {
+        msgs = [
+          ...msgs,
+          { role: 'agent', content: reply ? `${reply}\n(stopped)` : 'Stopped.' },
+        ]
+      } else {
+        msgs = [
+          ...msgs,
+          { role: 'agent', content: `Error: ${errorMessage(err)}` },
+        ]
+      }
     }
+    abortRef.current = null
     setThread(msgs)
     setIsLoading(false)
     setProgress(null)
@@ -281,15 +379,33 @@ export function AgentChatPanel({
     <aside className="flex w-80 shrink-0 flex-col rounded-lg border">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-medium">Partner</span>
-        <Button
-          aria-label="Close agent chat"
-          size="sm"
-          variant="ghost"
-          className="size-7 p-0"
-          onClick={() => setOpen(false)}
-        >
-          ×
-        </Button>
+        <div className="flex items-center gap-1">
+          <select
+            aria-label="Model"
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value)
+              localStorage.setItem(MODEL_KEY, e.target.value)
+            }}
+            className="max-w-36 bg-transparent text-xs text-muted-foreground outline-none"
+          >
+            <option value="">Server default</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m.replace(/^gemini-/, '')}
+              </option>
+            ))}
+          </select>
+          <Button
+            aria-label="Close agent chat"
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </Button>
+        </div>
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
@@ -330,9 +446,15 @@ export function AgentChatPanel({
           placeholder="Ask your partner…"
           disabled={!activeId || isLoading}
         />
-        <Button type="submit" size="sm" disabled={!input.trim() || isLoading}>
-          Send
-        </Button>
+        {isLoading ? (
+          <Button type="button" size="sm" variant="destructive" onClick={stop}>
+            Stop
+          </Button>
+        ) : (
+          <Button type="submit" size="sm" disabled={!input.trim()}>
+            Send
+          </Button>
+        )}
       </form>
     </aside>
   )
