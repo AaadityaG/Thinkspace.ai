@@ -1,13 +1,16 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
   ChevronsUpDown,
   LayoutDashboard,
   LogOut,
   Moon,
+  Pencil,
   PenTool,
+  Plus,
   Sun,
+  X,
 } from 'lucide-react'
 
 import { api } from '@/services/api'
@@ -17,6 +20,12 @@ import {
   useLogoutMutation,
   useSetPasswordMutation,
 } from '@/services/authApi'
+import {
+  useCreatePageMutation,
+  useDeletePageMutation,
+  useGetPagesQuery,
+  useRenamePageMutation,
+} from '@/services/pagesApi'
 import { useTheme } from '@/components/ThemeProvider'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -192,6 +201,109 @@ function UserFooter() {
   )
 }
 
+function WorkspacesSection() {
+  const { data } = useGetPagesQuery()
+  const [createPage] = useCreatePageMutation()
+  const [renamePage] = useRenamePageMutation()
+  const [deletePage] = useDeletePageMutation()
+  const [params, setParams] = useSearchParams()
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  const pages = data?.pages ?? []
+  const activeId = params.get('id')
+  const select = (id: string) => setParams({ id })
+
+  const commitRename = async () => {
+    const id = renamingId
+    const name = renameValue.trim()
+    setRenamingId(null)
+    if (!id || !name || name === pages.find((p) => p.id === id)?.name) return
+    await renamePage({ id, name }).unwrap().catch((err) => errorMessage(err))
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this workspace?')) return
+    await deletePage(id).unwrap().catch((err) => errorMessage(err))
+    if (activeId === id) {
+      const remaining = pages.filter((p) => p.id !== id)
+      if (remaining[0]) select(remaining[0].id)
+    }
+  }
+
+  return (
+    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+      <SidebarGroupLabel className="items-center justify-between">
+        Workspaces
+        <button
+          aria-label="New workspace"
+          className="hover:bg-sidebar-accent rounded p-0.5"
+          onClick={() =>
+            createPage({})
+              .unwrap()
+              .then((res) => select(res.page.id))
+              .catch((err) => errorMessage(err))
+          }
+        >
+          <Plus className="size-4" />
+        </button>
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {pages.map((page) => (
+            <SidebarMenuItem key={page.id} className="group/ws relative">
+              {renamingId === page.id ? (
+                <Input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename()
+                    if (e.key === 'Escape') setRenamingId(null)
+                  }}
+                  className="h-7 text-sm"
+                />
+              ) : (
+                <>
+                  <SidebarMenuButton asChild isActive={page.id === activeId} tooltip={page.name}>
+                    <NavLink to={`/workspace?id=${page.id}`}>
+                      <PenTool />
+                      <span className="truncate">{page.name}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                  <div className="absolute top-1/2 right-1 hidden -translate-y-1/2 gap-0.5 group-hover/ws:flex">
+                    <button
+                      aria-label={`Rename ${page.name}`}
+                      className="hover:bg-sidebar-accent rounded p-1"
+                      onClick={() => {
+                        setRenamingId(page.id)
+                        setRenameValue(page.name)
+                      }}
+                    >
+                      <Pencil className="size-3" />
+                    </button>
+                    <button
+                      aria-label={`Delete ${page.name}`}
+                      className="text-destructive hover:bg-sidebar-accent rounded p-1"
+                      onClick={() => handleDelete(page.id)}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                </>
+              )}
+            </SidebarMenuItem>
+          ))}
+          {pages.length === 0 && (
+            <li className="px-2 py-1 text-xs text-muted-foreground">None yet</li>
+          )}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
 function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
@@ -231,6 +343,7 @@ function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        <WorkspacesSection />
       </SidebarContent>
       <SidebarFooter>
         <ThemeToggle />

@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     JWT_EXPIRE_DAYS: int = 7
     GOOGLE_CLIENT_ID: str = ""
 
+    # AI (Google ADK / Gemini)
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash"
+
     class Config:
         env_file = ".env"
 

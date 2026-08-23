@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from agents.routes import router as agents_router
 from auth.routes import router as auth_router
 from core.config import settings
 from db.database import ensure_indexes
@@ -63,6 +64,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(pages_router)
+app.include_router(agents_router)
 
 
 @app.get("/health")
