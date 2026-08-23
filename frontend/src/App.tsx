@@ -4,6 +4,7 @@ import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import Workspace from './pages/Workspace'
 import ProtectedRoute from './components/ProtectedRoute'
 
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
@@ -23,6 +24,15 @@ function Router() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/workspace"
+          element={
+            <ProtectedRoute>
+              <Workspace />
             </ProtectedRoute>
           }
         />

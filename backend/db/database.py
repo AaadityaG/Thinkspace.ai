@@ -27,3 +27,5 @@ async def ensure_indexes(db) -> None:
         )
     except Exception as exc:
         print(f"[DB] index warning: {exc}")
+    await db.pages.create_index("user_id")
+    await db.page_versions.create_index([("page_id", 1), ("created_at", -1)])

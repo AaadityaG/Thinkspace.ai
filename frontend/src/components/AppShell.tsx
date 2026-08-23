@@ -1,14 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
   ChevronsUpDown,
-  Database,
-  FolderGit2,
   LayoutDashboard,
   LogOut,
-  MessageSquare,
   Moon,
+  PenTool,
   Sun,
 } from 'lucide-react'
 
@@ -50,26 +48,26 @@ import {
 } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
-const navMain = [{ title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' }]
-
-// ponytail: placeholder entries — wire to real pages when they exist
-const navSoon = [
-  { title: 'Sources', icon: FolderGit2 },
-  { title: 'Memory', icon: Database },
-  { title: 'Chat', icon: MessageSquare },
+const navMain = [
+  { title: 'Workspace', icon: PenTool, to: '/workspace' },
+  { title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
 ]
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme()
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label="Toggle theme"
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-    >
-      {theme === 'dark' ? <Sun /> : <Moon />}
-    </Button>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          aria-label="Toggle theme"
+          tooltip="Toggle theme"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        >
+          {theme === 'dark' ? <Sun /> : <Moon />}
+          <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
   )
 }
 
@@ -147,35 +145,50 @@ function UserFooter() {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-sidebar-accent">
-          <Avatar className="size-8">
-            {user.picture && <AvatarImage src={user.picture} alt={user.name} />}
-            <AvatarFallback>{initials || '?'}</AvatarFallback>
-          </Avatar>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">
-              {user.name}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {user.email}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-(--radix-dropdown-menu-trigger-width)">
-        <DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <ChangePasswordForm hasPassword={user.has_password} />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout}>
-          <LogOut />
-          Log out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              size="lg"
+              tooltip={user.name}
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+            >
+              <Avatar className="size-8">
+                {user.picture && (
+                  <AvatarImage src={user.picture} alt={user.name} />
+                )}
+                <AvatarFallback>{initials || '?'}</AvatarFallback>
+              </Avatar>
+              <span
+                className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden"
+              >
+                <span className="truncate text-sm font-medium">{user.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {user.email}
+                </span>
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            sideOffset={4}
+            className="z-[9999] w-(--radix-dropdown-menu-trigger-width) min-w-56"
+          >
+            <DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <ChangePasswordForm hasPassword={user.has_password} />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleLogout}>
+              <LogOut />
+              Log out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   )
 }
 
@@ -190,7 +203,9 @@ function AppSidebar() {
                 <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
                   T
                 </span>
-                <span className="font-semibold">Thinkspace.ai</span>
+                <span className="font-semibold group-data-[collapsible=icon]:hidden">
+                  Thinkspace.ai
+                </span>
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -216,23 +231,9 @@ function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Coming soon</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navSoon.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton disabled tooltip={item.title}>
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
+        <ThemeToggle />
         <UserFooter />
       </SidebarFooter>
       <SidebarRail />
@@ -240,19 +241,28 @@ function AppSidebar() {
   )
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  actions,
+}: {
+  children: ReactNode
+  actions?: ReactNode
+}) {
+  const { pathname } = useLocation()
+  const title =
+    navMain.find((item) => pathname.startsWith(item.to))?.title ?? 'Dashboard'
   return (
     <TooltipProvider>
-      <SidebarProvider>
+      <SidebarProvider defaultOpen={false}>
         <AppSidebar />
         <SidebarInset>
           <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
             <SidebarTrigger />
             <Separator orientation="vertical" className="mr-1 h-4!" />
-            <span className="text-sm font-medium">Dashboard</span>
-            <div className="ml-auto flex items-center gap-1">
-              <ThemeToggle />
-            </div>
+            <span className="text-sm font-medium">{title}</span>
+            {actions && (
+              <div className="ml-auto flex items-center gap-2">{actions}</div>
+            )}
           </header>
           <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>
         </SidebarInset>

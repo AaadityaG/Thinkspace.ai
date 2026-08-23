@@ -3,7 +3,11 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 export const api = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({ baseUrl: '/api', credentials: 'include' }),
-  tagTypes: ['User'],
+  // refetchOnFocus disabled: a surprise refetch of page detail would clobber
+  // in-progress canvas edits with the last-saved snapshot.
+  refetchOnFocus: false,
+  refetchOnReconnect: false,
+  tagTypes: ['User', 'Page'],
   endpoints: (builder) => ({
     getHealth: builder.query<{ status: string; version: string }, void>({
       query: () => '/health',

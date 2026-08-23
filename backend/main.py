@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from auth.routes import router as auth_router
 from core.config import settings
 from db.database import ensure_indexes
+from pages.routes import router as pages_router
 
 
 @asynccontextmanager
@@ -61,6 +62,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(pages_router)
 
 
 @app.get("/health")
