@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pencil, Plus, X } from 'lucide-react'
-import { Editor, Tldraw } from 'tldraw'
+import { Editor, Tldraw, useEditor } from 'tldraw'
 import 'tldraw/tldraw.css'
 
 import { AppShell } from '@/components/AppShell'
+import { useTheme } from '@/components/ThemeProvider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { errorMessage } from '@/services/authApi'
@@ -18,6 +19,16 @@ import {
 } from '@/services/pagesApi'
 
 type Snapshot = Parameters<Editor['loadSnapshot']>[0]
+
+// Keeps the canvas in sync with the app-wide theme toggle.
+function ThemeSync() {
+  const { theme } = useTheme()
+  const editor = useEditor()
+  useEffect(() => {
+    editor.user.updateUserPreferences({ colorScheme: theme })
+  }, [theme, editor])
+  return null
+}
 
 function formatWhen(iso: string | null): string {
   if (!iso) return ''
@@ -208,8 +219,10 @@ export default function Workspace() {
               )
               tryLoadSnapshot()
             }}
-          />
-      </section>
+          >
+            <ThemeSync />
+          </Tldraw>
+        </section>
 
       {/* Pages panel */}
       <aside className="flex w-64 shrink-0 flex-col rounded-lg border">
