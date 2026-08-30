@@ -189,7 +189,9 @@ export default function Workspace() {
           <ThemeSync />
           </Tldraw>
         </section>
-        <AgentChatPanel activeId={activeId} editorRef={editorRef} />
+        {pages.length > 0 && (
+          <AgentChatPanel activeId={activeId} editorRef={editorRef} />
+        )}
       </div>
     </AppShell>
   )
