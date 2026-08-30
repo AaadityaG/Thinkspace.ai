@@ -18,6 +18,11 @@ class SnapshotIn(BaseModel):
     snapshot: dict
 
 
+class MessageIn(BaseModel):
+    role: str = Field(pattern="^(user|agent)$")
+    content: str = Field(min_length=1, max_length=20000)
+
+
 def _iso(value):
     return value.isoformat() if hasattr(value, "isoformat") else value
 
@@ -105,6 +110,59 @@ async def rename_page(
     return {"ok": True}
 
 
+@router.get("/{page_id}/messages")
+async def list_messages(
+    page_id: str, user: dict = Depends(get_current_user), db=Depends(get_db)
+):
+    await _owned_page(db, page_id, user["id"])
+    messages = []
+    async for doc in db.chatMessages.find({"page_id": page_id}).sort("seq", 1):
+        messages.append(
+            {
+                "id": doc["_id"],
+                "role": doc["role"],
+                "content": doc["content"],
+                "seq": doc["seq"],
+                "created_at": _iso(doc.get("created_at")),
+            }
+        )
+    return {"messages": messages}
+
+
+@router.post("/{page_id}/messages", status_code=status.HTTP_201_CREATED)
+async def add_message(
+    page_id: str,
+    body: MessageIn,
+    user: dict = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    await _owned_page(db, page_id, user["id"])
+    last = await db.chatMessages.find_one(
+        {"page_id": page_id}, sort=[("seq", -1)]
+    )
+    seq = (last["seq"] + 1) if last else 1
+    now = datetime.now(timezone.utc)
+    doc = {
+        "_id": uuid.uuid4().hex,
+        "user_id": user["id"],
+        "page_id": page_id,
+        "role": body.role,
+        "content": body.content,
+        "seq": seq,
+        "created_at": now,
+    }
+    await db.chatMessages.insert_one(doc)
+    return {
+        "message": {
+            "id": doc["_id"],
+            "role": doc["role"],
+            "content": doc["content"],
+            "seq": seq,
+            "created_at": _iso(now),
+        }
+    }
+
+
 @router.delete("/{page_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_page(
     page_id: str, user: dict = Depends(get_current_user), db=Depends(get_db)
@@ -112,4 +170,5 @@ async def delete_page(
     await _owned_page(db, page_id, user["id"])
     await db.pages.delete_one({"_id": page_id})
     await db.page_versions.delete_many({"page_id": page_id})
+    await db.chatMessages.delete_many({"page_id": page_id})
     return Response(status_code=status.HTTP_204_NO_CONTENT)

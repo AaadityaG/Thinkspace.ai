@@ -16,6 +16,10 @@ import { Bot, MessageSquare, Send, Square, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/services/authApi'
+import {
+  useAppendMessageMutation,
+  useGetMessagesQuery,
+} from '@/services/pagesApi'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -467,6 +471,7 @@ export function AgentChatPanel({
   const [model, setModel] = useState(
     () => localStorage.getItem(MODEL_KEY) || '',
   )
+  const [appendMessage] = useAppendMessageMutation()
 
   useEffect(() => {
     fetch('/api/agents/models', { credentials: 'include' })
@@ -480,6 +485,25 @@ export function AgentChatPanel({
   const labelsRef = useRef(new Map<string, LabelMap>())
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const appendRef = useRef(appendMessage)
+  appendRef.current = appendMessage
+
+  // Load the page's saved chat history from the DB into the in-memory thread
+  // whenever the active workspace changes (covers refresh + switching pages).
+  const { data: savedMessages } = useGetMessagesQuery(activeId ?? '', {
+    skip: !activeId,
+  })
+  const loadedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeId || !savedMessages) return
+    const threadId = loadedRef.current
+    if (threadId === activeId) return
+    loadedRef.current = activeId
+    const loaded: Msg[] = (savedMessages.messages ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'agent')
+      .map((m) => ({ role: m.role, content: m.content }))
+    threadsRef.current.set(activeId, loaded)
+  }, [activeId, savedMessages])
 
   const thread = (activeId ? threadsRef.current.get(activeId) : null) ?? []
   const setThread = (msgs: Msg[]) => {
@@ -521,6 +545,12 @@ export function AgentChatPanel({
     setProgress(null)
     let msgs = [...thread, { role: 'user' as const, content: message }]
     setThread(msgs)
+    // Persist the user's message immediately (fire-and-forget) so a hard
+    // refresh mid-answer still keeps the prompt.
+    if (activeId)
+      appendRef.current({ id: activeId, role: 'user', content: message }).catch(
+        () => {},
+      )
     let reply = ''
     try {
       // Give the agent eyes: summarize the canvas and seed the executor's
@@ -608,6 +638,13 @@ export function AgentChatPanel({
       }
     }
     abortRef.current = null
+    // Persist whichever agent message landed (reply, stopped, or error) so
+    // the conversation survives a refresh.
+    const last = msgs[msgs.length - 1]
+    if (activeId && last && last.role === 'agent')
+      appendRef.current({ id: activeId, role: 'agent', content: last.content }).catch(
+        () => {},
+      )
     setThread(msgs)
     setIsLoading(false)
     setProgress(null)

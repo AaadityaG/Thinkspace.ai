@@ -11,6 +11,14 @@ export interface PageDetail extends PageSummary {
   snapshot: Record<string, unknown> | null
 }
 
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'agent'
+  content: string
+  seq: number
+  created_at: string | null
+}
+
 export const pagesApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getPages: builder.query<{ pages: PageSummary[] }, void>({
@@ -49,6 +57,19 @@ export const pagesApi = api.injectEndpoints({
       query: (id) => ({ url: `/pages/${id}`, method: 'DELETE' }),
       invalidatesTags: [{ type: 'Page', id: 'LIST' }],
     }),
+    getMessages: builder.query<{ messages: ChatMessage[] }, string>({
+      query: (id) => `/pages/${id}/messages`,
+    }),
+    appendMessage: builder.mutation<
+      { message: ChatMessage },
+      { id: string; role: 'user' | 'agent'; content: string }
+    >({
+      query: ({ id, role, content }) => ({
+        url: `/pages/${id}/messages`,
+        method: 'POST',
+        body: { role, content },
+      }),
+    }),
   }),
 })
 
@@ -59,4 +80,6 @@ export const {
   useSaveSnapshotMutation,
   useRenamePageMutation,
   useDeletePageMutation,
+  useGetMessagesQuery,
+  useAppendMessageMutation,
 } = pagesApi
