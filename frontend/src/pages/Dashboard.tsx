@@ -50,7 +50,7 @@ export default function Dashboard() {
             Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
           </h1>
           <p className="text-muted-foreground mt-2 max-w-lg">
-            A space where human + Agents think together. Sketch your thoughts,
+            A space where human + Agents plan together. Sketch your thoughts,
             research deeply, and let AI build the diagrams.
           </p>
           <Button asChild size="lg" className="mt-6">

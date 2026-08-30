@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
-import { PenTool, Search, Workflow } from 'lucide-react'
+import { LayoutDashboard, PenTool, Search, Workflow } from 'lucide-react'
 import { ShaderBackground } from '@/components/ui/hero-shader'
 import { ShaderBackground as RedBlackShader } from '@/components/ui/red-black-vanila'
 import { Button } from '@/components/ui/button'
+import { useGetMeQuery } from '@/services/authApi'
 
 const proof = [
   {
@@ -23,6 +24,9 @@ const proof = [
 ]
 
 export default function Landing() {
+  const { data } = useGetMeQuery()
+  const loggedIn = Boolean(data?.user)
+
   return (
     <ShaderBackground className="min-h-svh bg-[#0a0914] text-white">
       <div aria-hidden className="pointer-events-none absolute inset-0 z-0 opacity-80">
@@ -39,12 +43,23 @@ export default function Landing() {
        
 
         <div className="flex items-center gap-2">
-          <Button asChild variant="ghost" className="rounded-full text-xs text-white/80 hover:bg-white/10 hover:text-white">
-            <Link to="/login">Log in</Link>
-          </Button>
-          <Button asChild className="rounded-full bg-white text-black text-xs hover:bg-white/90">
-            <Link to="/register">Get started</Link>
-          </Button>
+          {loggedIn ? (
+            <Button asChild className="rounded-full bg-white text-black text-xs hover:bg-white/90">
+              <Link to="/dashboard">
+                <LayoutDashboard className="size-3.5" />
+                Dashboard
+              </Link>
+            </Button>
+          ) : (
+            <>
+              <Button asChild variant="ghost" className="rounded-full text-xs text-white/80 hover:bg-white/10 hover:text-white">
+                <Link to="/login">Log in</Link>
+              </Button>
+              <Button asChild className="rounded-full bg-white text-black text-xs hover:bg-white/90">
+                <Link to="/register">Get started</Link>
+              </Button>
+            </>
+          )}
         </div>
       </header>
 
@@ -52,7 +67,7 @@ export default function Landing() {
         <div className="flex max-w-3xl flex-col items-center gap-6">
           <h1 className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight md:text-7xl">
             A canvas where you and AI
-            <span className="italic font-light text-indigo-200"> think together</span>
+            <span className="italic font-light text-indigo-200"> plan together</span>
           </h1>
 
           <p className="max-w-xl text-balance text-sm font-light leading-relaxed text-white/70">

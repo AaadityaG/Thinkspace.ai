@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Moon, Sun } from 'lucide-react'
 import {
   errorMessage,
   useRegisterMutation,
@@ -17,14 +18,18 @@ import {
   FieldLabel,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useTheme } from '@/components/ThemeProvider'
 
 export default function Register() {
   const navigate = useNavigate()
+  const { theme, setTheme } = useTheme()
   const [register, { isLoading }] = useRegisterMutation()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark')
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -49,6 +54,16 @@ export default function Register() {
         </span>
         <span className="text-lg font-semibold">Thinkspace.ai</span>
       </Link>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        onClick={toggleTheme}
+        className="absolute top-4 right-4 rounded-full"
+      >
+        {theme === 'dark' ? <Sun className="size-5" /> : <Moon className="size-5" />}
+      </Button>
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold tracking-tight">

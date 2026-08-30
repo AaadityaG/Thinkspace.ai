@@ -1,6 +1,6 @@
 # Thinkspace.ai
 
-A space where human + Agents think together.
+A space where human + Agents plan together.
 
 An infinite visual canvas (powered by [tldraw](https://tldraw.dev)) where you can think, sketch, and build — with AI agents that read your canvas and draw on it alongside you.
 
