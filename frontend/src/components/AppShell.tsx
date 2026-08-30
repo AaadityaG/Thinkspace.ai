@@ -231,25 +231,29 @@ function WorkspacesSection() {
     }
   }
 
+  const createUntitled = async () => {
+    const next = pages.reduce((max, p) => {
+      const m = /^Untitled(?:\s(\d+))?$/.exec(p.name ?? '')
+      return Math.max(max, m ? Number(m[1] ?? 1) : 0)
+    }, 0)
+    try {
+      const res = await createPage({ name: `Untitled ${next + 1}` }).unwrap()
+      select(res.page.id)
+    } catch (err) {
+      errorMessage(err)
+    }
+  }
+
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel className="items-center justify-between">
-        Workspaces
-        <button
-          aria-label="New workspace"
-          className="hover:bg-sidebar-accent rounded p-0.5"
-          onClick={() =>
-            createPage({})
-              .unwrap()
-              .then((res) => select(res.page.id))
-              .catch((err) => errorMessage(err))
-          }
-        >
-          <Plus className="size-4" />
-        </button>
-      </SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton tooltip="New workspace" onClick={createUntitled}>
+              <Plus />
+              <span>New workspace</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           {pages.map((page) => (
             <SidebarMenuItem key={page.id} className="group/ws relative">
               {renamingId === page.id ? (
@@ -326,24 +330,26 @@ function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Platform</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navMain.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <NavLink to={item.to}>
-                    {({ isActive }) => (
-                      <SidebarMenuButton isActive={isActive} tooltip={item.title}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </SidebarMenuButton>
-                    )}
-                  </NavLink>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <WorkspacesSection />
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {navMain
+                  .filter((item) => item.to !== '/workspace')
+                  .map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <NavLink to={item.to}>
+                        {({ isActive }) => (
+                          <SidebarMenuButton isActive={isActive} tooltip={item.title}>
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </SidebarMenuButton>
+                        )}
+                      </NavLink>
+                    </SidebarMenuItem>
+                  ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <WorkspacesSection />
       </SidebarContent>
       <SidebarFooter>
         <ThemeToggle />
@@ -357,9 +363,11 @@ function AppSidebar() {
 export function AppShell({
   children,
   actions,
+  dense,
 }: {
   children: ReactNode
   actions?: ReactNode
+  dense?: boolean
 }) {
   const { pathname } = useLocation()
   const title =
@@ -377,7 +385,15 @@ export function AppShell({
               <div className="ml-auto flex items-center gap-2">{actions}</div>
             )}
           </header>
-          <main className="flex flex-1 flex-col gap-6 p-6">{children}</main>
+          <main
+            className={
+              dense
+                ? 'flex flex-1 flex-col gap-2 p-2'
+                : 'flex flex-1 flex-col gap-6 p-6'
+            }
+          >
+            {children}
+          </main>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

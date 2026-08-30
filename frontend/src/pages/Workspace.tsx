@@ -147,8 +147,8 @@ export default function Workspace() {
   )
 
   return (
-    <AppShell actions={headerActions}>
-      <div className="flex h-[calc(100svh-6.5rem)] min-h-0 w-full gap-3">
+    <AppShell actions={headerActions} dense>
+      <div className="flex h-[calc(100svh-4.5rem)] min-h-0 w-full gap-2">
         <section className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border">
           <Tldraw
           onMount={(editor) => {

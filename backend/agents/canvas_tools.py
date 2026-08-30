@@ -18,6 +18,18 @@ update_label, move_node, delete_nodes.
 Shapes are referenced by LABEL or ALIAS (connect/update/move/delete take
 from_label / to_label / label). x/y are optional; the frontend auto-places
 shapes that omit them.
+
+Optional style args (any combination; invalid values are ignored):
+  create_node: color, fill, font, dash, size   (geo shape only)
+  create_text: color, font, size
+  create_note: color
+Valid values:
+  color: black grey violet light-violet blue light-blue yellow orange green
+         light-green light-red red white
+  fill:  none solid semi      font: draw sans serif mono
+  dash:  draw solid dashed dotted      size: s m l xl
+Do not style shapes unless the user explicitly asks for colors or custom
+styles; then use only the valid values above.
 """
 
 
@@ -25,9 +37,10 @@ def queue_canvas_command(command: str, arguments: dict) -> dict:
     """Queue one canvas command for the frontend to execute.
 
     Use `command` values:
-      - create_node: {"shape": "rectangle"|"ellipse", "label": str}
-      - create_text: {"text": str, "x"?: int, "y"?: int}
-      - create_note: {"text": str}
+      - create_node: {"shape": "rectangle"|"ellipse", "label": str,
+                      "color"?: str, "fill"?: str, "font"?: str, "dash"?: str, "size"?: str}
+      - create_text: {"text": str, "x"?: int, "y"?: int, "color"?: str, "font"?: str, "size"?: str}
+      - create_note: {"text": str, "color"?: str}
       - connect: {"from_label": str, "to_label": str, "label"?: str}
       - update_label: {"label": str, "new_label": str}
       - move_node: {"label": str, "x": int, "y": int}

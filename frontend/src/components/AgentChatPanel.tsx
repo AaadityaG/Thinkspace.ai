@@ -4,16 +4,61 @@ import {
   renderPlaintextFromRichText,
   toRichText,
   type Editor,
+  type TLGeoShape,
+  type TLNoteShape,
   type TLRichText,
   type TLShapeId,
+  type TLTextShape,
 } from 'tldraw'
 import dagre from 'dagre'
+import { Bot, MessageSquare, Send, Square, X } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { errorMessage } from '@/services/authApi'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { errorMessage } from '@/services/authApi'
+function TypingDots() {
+  return (
+    <span className="flex items-center gap-1" aria-label="Thinking">
+      {[0, 150, 300].map((delay, i) => (
+        <span
+          key={i}
+          className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </span>
+  )
+}
+
+const VALID_STYLES = {
+  color: [
+    'black', 'grey', 'light-violet', 'violet', 'blue', 'light-blue',
+    'yellow', 'orange', 'green', 'light-green', 'light-red', 'red', 'white',
+  ],
+  fill: ['none', 'solid', 'semi'],
+  font: ['draw', 'sans', 'serif', 'mono'],
+  dash: ['draw', 'solid', 'dashed', 'dotted'],
+  size: ['s', 'm', 'l', 'xl'],
+} as const
+
+// Curated style props the agent may attach to a shape. Unknown or invalid
+// values are dropped so a sloppy model call can't corrupt the canvas.
+function styleOf(a: Record<string, unknown>): Partial<TLGeoShape['props']> {
+  const out = {} as Partial<TLGeoShape['props']>
+  for (const key of Object.keys(VALID_STYLES) as (keyof typeof VALID_STYLES)[]) {
+    const v = a[key]
+    if (
+      typeof v === 'string' &&
+      (VALID_STYLES[key] as readonly string[]).includes(v)
+    ) {
+      ;(out as Record<string, string>)[key] = v
+    }
+  }
+  return out
+}
 
 interface Msg {
   role: 'user' | 'agent'
@@ -90,6 +135,7 @@ function executeCommands(
         if (!text) break
         const { x, y } = pos()
         const id = createShapeId()
+        const style = styleOf(a)
         editor.createShape(
           command === 'create_note'
             ? {
@@ -97,7 +143,10 @@ function executeCommands(
                 type: 'note',
                 x,
                 y,
-                props: { richText: toRichText(text) },
+                props: {
+                  richText: toRichText(text),
+                  ...(style.color ? { color: style.color } : {}),
+                } as TLNoteShape['props'],
               }
             : {
                 id,
@@ -109,6 +158,7 @@ function executeCommands(
                   w: typeof a.width === 'number' ? a.width : 180,
                   h: typeof a.height === 'number' ? a.height : 60,
                   richText: toRichText(text),
+                  ...style,
                 },
               },
         )
@@ -120,11 +170,17 @@ function executeCommands(
         const text = typeof a.text === 'string' ? a.text : ''
         if (!text) break
         const { x, y } = pos()
+        const style = styleOf(a)
         editor.createShape({
           type: 'text',
           x,
           y,
-          props: { richText: toRichText(text) },
+          props: {
+            richText: toRichText(text),
+            color: style.color,
+            font: style.font,
+            size: style.size,
+          } as TLTextShape['props'],
         })
         break
       }
@@ -244,19 +300,21 @@ async function drawStructured(
   // Unique node refs in emission order.
   const refs: string[] = []
   const refKind = new Map<string, 'geo' | 'note'>()
-  const pushRef = (label: string, kind: 'geo' | 'note') => {
+  const refStyle = new Map<string, Partial<TLGeoShape['props']>>()
+  const pushRef = (label: string, kind: 'geo' | 'note', style = {}) => {
     // Existing-canvas refs join the layout graph but are never re-created
     // (guarded at creation time via labels.has).
     if (!label || refs.includes(label)) return
     refs.push(label)
     refKind.set(label, kind)
+    refStyle.set(label, style)
   }
   for (const { command, arguments: a } of nodeCmds) {
     const label =
       command === 'create_note'
         ? String(a.text ?? a.label ?? '')
         : String(a.label ?? '')
-    pushRef(label, command === 'create_note' ? 'note' : 'geo')
+    pushRef(label, command === 'create_note' ? 'note' : 'geo', styleOf(a))
   }
   for (const { arguments: a } of edgeCmds) {
     pushRef(String(a.from_label ?? ''), 'geo')
@@ -295,13 +353,17 @@ async function drawStructured(
     if (labels.has(ref)) continue
     const id = createShapeId()
     const pos = topLeft.get(ref)!
+    const style = refStyle.get(ref) ?? {}
     if (refKind.get(ref) === 'note') {
       editor.createShape({
         id,
         type: 'note',
         x: pos.x,
         y: pos.y,
-        props: { richText: toRichText(ref) },
+        props: {
+          richText: toRichText(ref),
+          ...(style.color ? { color: style.color } : {}),
+        } as TLNoteShape['props'],
       })
     } else {
       editor.createShape({
@@ -314,6 +376,7 @@ async function drawStructured(
           w: size(ref).width,
           h: 60,
           richText: toRichText(ref),
+          ...style,
         },
       })
     }
@@ -430,6 +493,26 @@ export function AgentChatPanel({
 
   const stop = () => abortRef.current?.abort()
 
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [input])
+
+  useEffect(() => {
+    if (open) textareaRef.current?.focus()
+  }, [open])
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      e.currentTarget.form?.requestSubmit()
+    }
+  }
+
   const send = async () => {
     const message = input.trim()
     if (!message || !activeId || isLoading) return
@@ -528,104 +611,150 @@ export function AgentChatPanel({
     setThread(msgs)
     setIsLoading(false)
     setProgress(null)
-    requestAnimationFrame(() =>
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }),
-    )
-  }
-
-  if (!open) {
-    return (
-      <Button
-        variant="outline"
-        className="h-auto shrink-0 writing-mode-vertical"
-        onClick={() => setOpen(true)}
-      >
-        Agent chat
-      </Button>
-    )
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+      textareaRef.current?.focus()
+    })
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col rounded-lg border">
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-sm font-medium">Partner</span>
-        <div className="flex items-center gap-1">
-          <select
-            aria-label="Model"
-            value={model}
-            onChange={(e) => {
-              setModel(e.target.value)
-              localStorage.setItem(MODEL_KEY, e.target.value)
-            }}
-            className="max-w-36 bg-transparent text-xs text-muted-foreground outline-none"
-          >
-            <option value="">Server default</option>
-            {models.map((m) => (
-              <option key={m} value={m}>
-                {m.replace(/^gemini-/, '')}
-              </option>
-            ))}
-          </select>
-          <Button
-            aria-label="Close agent chat"
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0"
-            onClick={() => setOpen(false)}
-          >
-            ×
-          </Button>
-        </div>
-      </div>
+    <aside
+      aria-label="Agent chat"
+      className={`relative h-full shrink-0 overflow-hidden rounded-lg border transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        open ? 'w-80' : 'w-10'
+      }`}
+    >
+      {open ? (
+        <div className="flex h-full w-80 flex-col">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <div className="flex items-center gap-1.5">
+              <Bot className="text-muted-foreground size-4" />
+              <span className="text-sm font-medium">Partner</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <select
+                aria-label="Model"
+                value={model}
+                onChange={(e) => {
+                  setModel(e.target.value)
+                  localStorage.setItem(MODEL_KEY, e.target.value)
+                }}
+                className="text-muted-foreground max-w-32 truncate bg-transparent text-xs outline-none"
+              >
+                <option value="">Server default</option>
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m.replace(/^gemini-/, '')}
+                  </option>
+                ))}
+              </select>
+              <Button
+                aria-label="Close agent chat"
+                size="icon-sm"
+                variant="ghost"
+                className="size-6"
+                onClick={() => setOpen(false)}
+              >
+                <X />
+              </Button>
+            </div>
+          </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-        {thread.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Ask your partner to plan something — e.g. “Map out an auth flow”.
-          </p>
-        )}
-        {thread.map((m, i) => (
           <div
-            key={i}
-            className={
-              m.role === 'user'
-                ? 'ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground'
-                : 'mr-6 rounded-lg bg-muted px-3 py-2 text-sm whitespace-pre-wrap'
-            }
+            ref={scrollRef}
+            className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
           >
-            {m.content}
+            {thread.length === 0 && (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+                <Bot className="text-muted-foreground/60 size-8" />
+                <p className="text-xs text-muted-foreground">
+                  Ask your partner to plan something — e.g. “Map out an auth
+                  flow”.
+                </p>
+              </div>
+            )}
+            {thread.map((m, i) => (
+              <div
+                key={i}
+                className={
+                  m.role === 'user'
+                    ? 'ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground'
+                    : 'mr-6 rounded-lg bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap'
+                }
+              >
+                {m.content}
+              </div>
+            ))}
+            {isLoading && (
+              <div className="mr-6 flex min-h-8 w-fit min-w-14 items-center rounded-lg bg-muted px-3 py-2">
+                {progress ? (
+                  <span className="text-xs text-muted-foreground">
+                    {progress}
+                  </span>
+                ) : (
+                  <TypingDots />
+                )}
+              </div>
+            )}
           </div>
-        ))}
-        {isLoading && (
-          <div className="mr-6 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            {progress ?? 'Thinking…'}
-          </div>
-        )}
-      </div>
 
-      <form
-        className="flex gap-2 border-t p-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          send()
-        }}
-      >
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask your partner…"
-          disabled={!activeId || isLoading}
-        />
-        {isLoading ? (
-          <Button type="button" size="sm" variant="destructive" onClick={stop}>
-            Stop
-          </Button>
-        ) : (
-          <Button type="submit" size="sm" disabled={!input.trim()}>
-            Send
-          </Button>
-        )}
-      </form>
+          <form
+            className="border-t p-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              send()
+            }}
+          >
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              aria-label="Message"
+              placeholder="Ask your partner…"
+              disabled={!activeId || isLoading}
+              className="max-h-40 min-h-9"
+            />
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <span className="text-muted-foreground text-[10px]">
+                Enter to send · Shift+Enter for a new line
+              </span>
+              {isLoading ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={stop}
+                >
+                  <Square /> Stop
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!input.trim() || !activeId}
+                >
+                  <Send /> Send
+                </Button>
+              )}
+            </div>
+          </form>
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label="Open agent chat"
+          aria-expanded={false}
+          onClick={() => setOpen(true)}
+          className="text-muted-foreground flex h-full w-10 flex-col items-center justify-center gap-2 rounded-lg outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          <MessageSquare className="size-4" />
+          <span className="text-xs font-medium [writing-mode:vertical-rl]">
+            Partner
+          </span>
+        </button>
+      )}
     </aside>
   )
 }

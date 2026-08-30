@@ -34,6 +34,13 @@ root_agent = LlmAgent(
         "  * Labels are 1-4 words. Max ~10 nodes unless asked for more. Connect "
         "everything that genuinely relates; skip redundant edges.\n"
         "  * Use create_note for annotations or risks worth pinning next to nodes.\n"
+        "  * Keep styling default (black) unless the user explicitly asks for "
+        "colors or styled shapes. Only then pass style args. Per create_node: "
+        "color (black, grey, violet, light-violet, blue, light-blue, yellow, "
+        "orange, green, light-green, light-red, red, white), fill (none, solid, "
+        "semi), font (draw, sans, serif, mono), dash (draw, solid, dashed, "
+        "dotted), size (s, m, l, xl). create_note accepts color; create_text "
+        "accepts color, font, size.\n"
         "- Be concise, practical and challenge weak assumptions when relevant."
     ),
     tools=[queue_canvas_command],
