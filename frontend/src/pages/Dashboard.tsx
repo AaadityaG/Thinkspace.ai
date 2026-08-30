@@ -42,7 +42,7 @@ export default function Dashboard() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
+      <div className="flex w-full flex-col gap-8">
         {/* Hero */}
         <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-8">
           <p className="text-sm font-medium text-primary">Thinkspace.ai</p>
@@ -50,7 +50,7 @@ export default function Dashboard() {
             Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
           </h1>
           <p className="text-muted-foreground mt-2 max-w-lg">
-            A space where human + Agents think together. Sketch your thoughts,
+            A space where human + Agents plan together. Sketch your thoughts,
             research deeply, and let AI build the diagrams.
           </p>
           <Button asChild size="lg" className="mt-6">

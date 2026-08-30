@@ -28,3 +28,4 @@ async def ensure_indexes(db) -> None:
     except Exception as exc:
         print(f"[DB] index warning: {exc}")
     await db.pages.create_index("user_id")
+    await db.chatMessages.create_index([("page_id", 1), ("seq", 1)])

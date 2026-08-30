@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pencil, Plus, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { Editor, Tldraw, useEditor } from 'tldraw'
 import 'tldraw/tldraw.css'
 
 import { AppShell } from '@/components/AppShell'
+import { AgentChatPanel } from '@/components/AgentChatPanel'
 import { useTheme } from '@/components/ThemeProvider'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { errorMessage } from '@/services/authApi'
 import {
   useCreatePageMutation,
-  useDeletePageMutation,
   useGetPageQuery,
   useGetPagesQuery,
-  useRenamePageMutation,
   useSaveSnapshotMutation,
-  type PageSummary,
 } from '@/services/pagesApi'
 
 type Snapshot = Parameters<Editor['loadSnapshot']>[0]
@@ -30,42 +25,43 @@ function ThemeSync() {
   return null
 }
 
-function formatWhen(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
-}
-
 export default function Workspace() {
   const { data: pagesData } = useGetPagesQuery()
   const [createPage] = useCreatePageMutation()
-  const [deletePage] = useDeletePageMutation()
-  const [renamePage] = useRenamePageMutation()
   const [saveSnapshot] = useSaveSnapshotMutation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeId = searchParams.get('id')
 
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(
+    'idle',
+  )
 
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
-
-  const pages: PageSummary[] = pagesData?.pages ?? []
+  const pages = pagesData?.pages ?? []
   const activePage = pages.find((p) => p.id === activeId)
+  const firstId = pages[0]?.id
+  const hasActive = activeId ? pages.some((p) => p.id === activeId) : false
 
   // Auto-select most recent page.
   useEffect(() => {
-    if (!activeId && pages.length > 0) setActiveId(pages[0].id)
-  }, [pages, activeId])
+    if (!activeId && firstId)
+      setSearchParams({ id: firstId }, { replace: true })
+  }, [firstId, activeId, setSearchParams])
 
   // First visit: create an initial page automatically.
   useEffect(() => {
-    if (pagesData && pages.length === 0 && activeId === null) {
+    if (pagesData && !hasActive && pages.length === 0 && !activeId) {
       createPage({})
         .unwrap()
-        .then((res) => setActiveId(res.page.id))
+        .then((res) => setSearchParams({ id: res.page.id }, { replace: true }))
         .catch(() => {})
     }
-  }, [pagesData, pages.length, activeId, createPage])
+  }, [pagesData, hasActive, pages.length, activeId, createPage, setSearchParams])
+
+  // Active page was deleted elsewhere (or bad id) — fall back to first.
+  useEffect(() => {
+    if (activeId && firstId && !hasActive)
+      setSearchParams({ id: firstId }, { replace: true })
+  }, [hasActive, firstId, activeId, setSearchParams])
 
   const { data: detail } = useGetPageQuery(activeId ?? '', { skip: !activeId })
 
@@ -86,22 +82,26 @@ export default function Workspace() {
   saveFnRef.current = saveSnapshot
   const saveTimerRef = useRef<number | undefined>(undefined)
 
-  const flushSave = useCallback(() => {
-    if (!saveTimerRef.current) return
+  // Save the previous page before switching (switches now come from the
+  // sidebar, outside this component's control).
+  const prevIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevIdRef.current
+    prevIdRef.current = activeId
+    if (!prev || prev === activeId || !prev) return
+
     window.clearTimeout(saveTimerRef.current)
     saveTimerRef.current = undefined
     const editor = editorRef.current
-    const id = activeIdRef.current
-    if (!editor || !id) return
+    if (!editor) return
     const snap = editor.getSnapshot() as unknown as Record<string, unknown>
     const json = JSON.stringify(snap)
-    // Loading a page also fires the store listener — skip no-op saves so
-    // merely opening a page doesn't bump updated_at or add versions.
-    if (json === loadedJsonRef.current) return
-    snapCacheRef.current.set(id, snap as Snapshot)
-    loadedJsonRef.current = json
-    saveFnRef.current({ id, snapshot: snap }).unwrap().catch(() => {})
-  }, [])
+    if (json !== loadedJsonRef.current) {
+      snapCacheRef.current.set(prev, snap as Snapshot)
+      saveSnapshot({ id: prev, snapshot: snap }).unwrap().catch(() => {})
+    }
+    loadedJsonRef.current = ''
+  }, [activeId, saveSnapshot])
 
   const tryLoadSnapshot = useCallback(() => {
     const editor = editorRef.current
@@ -133,43 +133,9 @@ export default function Workspace() {
     return () => window.clearTimeout(saveTimerRef.current)
   }, [])
 
-  const handleDeletePage = async (id: string) => {
-    if (!window.confirm('Delete this page and its history?')) return
-    flushSave()
-    snapCacheRef.current.delete(id)
-    await deletePage(id).unwrap().catch((err) => errorMessage(err))
-    if (activeIdRef.current === id) {
-      const remaining = pages.filter((p) => p.id !== id)
-      setActiveId(remaining[0]?.id ?? null)
-      loadedJsonRef.current = ''
-    }
-  }
-
-  const handleSelectPage = (id: string) => {
-    if (id === activeIdRef.current) return
-    flushSave()
-    loadedJsonRef.current = ''
-    setActiveId(id)
-  }
-
-  const startRename = (page: PageSummary) => {
-    setRenamingId(page.id)
-    setRenameValue(page.name)
-  }
-
-  const commitRename = async () => {
-    const id = renamingId
-    const name = renameValue.trim()
-    setRenamingId(null)
-    if (!id || !name || name === pages.find((p) => p.id === id)?.name) return
-    await renamePage({ id, name }).unwrap().catch((err) => errorMessage(err))
-  }
-
   const headerActions = (
     <>
-      <span className="text-sm font-medium">
-        {activePage?.name ?? ''}
-      </span>
+      <span className="text-sm font-medium">{activePage?.name ?? ''}</span>
       <span className="text-muted-foreground text-xs">
         {saveState === 'saving'
           ? 'Saving…'
@@ -181,130 +147,51 @@ export default function Workspace() {
   )
 
   return (
-    <AppShell actions={headerActions}>
-      <div className="flex h-[calc(100svh-6.5rem)] min-h-0 flex-1 gap-4">
+    <AppShell actions={headerActions} dense>
+      <div className="flex h-[calc(100svh-4.5rem)] min-h-0 w-full gap-2">
         <section className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border">
           <Tldraw
-            onMount={(editor) => {
-              editorRef.current = editor
-              emptySnapRef.current = editor.getSnapshot()
-              editor.store.listen(
-                () => {
-                  setSaveState('saving')
-                  window.clearTimeout(saveTimerRef.current)
-                  saveTimerRef.current = window.setTimeout(() => {
-                    saveTimerRef.current = undefined
-                    const id = activeIdRef.current
-                    if (!id) return
-                    const snap = editor.getSnapshot() as unknown as Record<
-                      string,
-                      unknown
-                    >
-                    const json = JSON.stringify(snap)
-                    // Skip no-op saves (e.g. ones triggered by loadSnapshot).
-                    if (json === loadedJsonRef.current) {
-                      setSaveState('idle')
-                      return
-                    }
-                    snapCacheRef.current.set(id, snap as Snapshot)
-                    loadedJsonRef.current = json
-                    saveFnRef
-                      .current({ id, snapshot: snap })
-                      .unwrap()
-                      .then(() => setSaveState('saved'))
-                      .catch(() => setSaveState('idle'))
-                  }, 1500)
-                },
-                { scope: 'document' },
-              )
-              tryLoadSnapshot()
-            }}
-          >
-            <ThemeSync />
+          onMount={(editor) => {
+            editorRef.current = editor
+            emptySnapRef.current = editor.getSnapshot()
+            editor.store.listen(
+              () => {
+                setSaveState('saving')
+                window.clearTimeout(saveTimerRef.current)
+                saveTimerRef.current = window.setTimeout(() => {
+                  saveTimerRef.current = undefined
+                  const id = activeIdRef.current
+                  if (!id) return
+                  const snap = editor.getSnapshot() as unknown as Record<
+                    string,
+                    unknown
+                  >
+                  const json = JSON.stringify(snap)
+                  // Skip no-op saves (e.g. ones triggered by loadSnapshot).
+                  if (json === loadedJsonRef.current) {
+                    setSaveState('idle')
+                    return
+                  }
+                  snapCacheRef.current.set(id, snap as Snapshot)
+                  loadedJsonRef.current = json
+                  saveFnRef
+                    .current({ id, snapshot: snap })
+                    .unwrap()
+                    .then(() => setSaveState('saved'))
+                    .catch(() => setSaveState('idle'))
+                }, 1500)
+              },
+              { scope: 'document' },
+            )
+            tryLoadSnapshot()
+          }}
+        >
+          <ThemeSync />
           </Tldraw>
         </section>
-
-      {/* Pages panel */}
-      <aside className="flex w-64 shrink-0 flex-col rounded-lg border">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-medium">Workspaces</span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              createPage({})
-                .unwrap()
-                .then((res) => handleSelectPage(res.page.id))
-                .catch((err) => errorMessage(err))
-            }
-          >
-            <Plus /> New
-          </Button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {pages.map((page) => (
-            <div
-              key={page.id}
-              className={`group flex items-center gap-1 px-2 py-1.5 ${
-                page.id === activeId ? 'bg-accent' : 'hover:bg-accent/50'
-              }`}
-            >
-              {renamingId === page.id ? (
-                <Input
-                  autoFocus
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename()
-                    if (e.key === 'Escape') setRenamingId(null)
-                  }}
-                  className="h-7 text-sm"
-                />
-              ) : (
-                <>
-                  <button
-                    className="min-w-0 flex-1 cursor-pointer text-left"
-                    title="Click to open · double-click to rename"
-                    onClick={() => handleSelectPage(page.id)}
-                    onDoubleClick={() => startRename(page)}
-                  >
-                    <span className="block truncate text-sm">{page.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {formatWhen(page.updated_at)}
-                    </span>
-                  </button>
-                  <Button
-                    aria-label={`Rename ${page.name}`}
-
-                    size="icon"
-                    variant="ghost"
-                    className="size-7 opacity-0 group-hover:opacity-100"
-                    onClick={() => startRename(page)}
-                  >
-                    <Pencil />
-                  </Button>
-                  <Button
-                    aria-label={`Delete ${page.name}`}
-                    size="icon"
-                    variant="ghost"
-                    className="size-7 opacity-0 group-hover:opacity-100"
-                    onClick={() => handleDeletePage(page.id)}
-                  >
-                    <X />
-                  </Button>
-                </>
-              )}
-            </div>
-          ))}
-          {pages.length === 0 && (
-            <p className="px-3 py-4 text-xs text-muted-foreground">
-              No workspaces yet
-            </p>
-          )}
-        </div>
-      </aside>
+        {pages.length > 0 && (
+          <AgentChatPanel activeId={activeId} editorRef={editorRef} />
+        )}
       </div>
     </AppShell>
   )
