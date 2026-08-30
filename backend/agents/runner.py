@@ -1,10 +1,17 @@
 from collections.abc import AsyncIterator
+import logging
 
 from google.adk.runners import InMemoryRunner
 from google.genai import errors as genai_errors
 from google.genai import types
 
 from agents.root_agent import root_agent
+
+logger = logging.getLogger("thinkspace.agents")
+
+
+def _log_if_debug(err: Exception) -> None:
+    logger.warning("Gemini error surfaced to chat: %s", str(err)[:200])
 
 APP_NAME = "thinkspace"
 _runner: InMemoryRunner | None = None
@@ -54,18 +61,25 @@ async def stream_chat(
                         part.function_call
                         and part.function_call.name == "queue_canvas_command"
                     ):
+                        args = part.function_call.args or {}
                         yield (
                             "cmd",
                             {
-                                "command": part.function_call.args.get("command"),
-                                "arguments": part.function_call.args.get(
-                                    "arguments"
-                                )
-                                or {},
+                                "command": args.get("command"),
+                                "arguments": args.get("arguments") or {},
                             },
                         )
             if event.is_final_response() and event.content and event.content.parts:
                 final += "".join(part.text or "" for part in event.content.parts)
+    except genai_errors.ServerError as e:
+        # 503 = model overloaded ("high demand") — usually transient.
+        yield (
+            "text",
+            "The model is overloaded right now (Gemini 503). Try again in a "
+            "minute, or switch models from the picker above the chat.",
+        )
+        _log_if_debug(e)
+        return
     except genai_errors.ClientError as e:
         # Free tier: ~20 requests/day per model — fail with a readable chat
         # message instead of a 500 + traceback.
@@ -74,8 +88,8 @@ async def stream_chat(
             yield (
                 "text",
                 "I hit the Gemini free-tier rate limit (20 requests/day per "
-                "model). Try again later, set GEMINI_MODEL to another model "
-                "with quota left, or enable billing on your API key.",
+                "model). Try again later, switch to another model with quota "
+                "left, or enable billing on your API key.",
             )
             return
         raise

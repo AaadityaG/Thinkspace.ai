@@ -7,6 +7,9 @@ import {
   type TLRichText,
   type TLShapeId,
 } from 'tldraw'
+import dagre from 'dagre'
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +31,37 @@ type LabelMap = Map<string, TLShapeId>
 function centerOf(editor: Editor, id: TLShapeId) {
   const bounds = editor.getShapePageBounds(id)
   return { x: bounds?.midX ?? 0, y: bounds?.midY ?? 0 }
+}
+
+function createArrow(
+  editor: Editor,
+  fromId: TLShapeId,
+  toId: TLShapeId,
+  label?: string,
+) {
+  const arrowId = createShapeId()
+  const start = centerOf(editor, fromId)
+  editor.run(() => {
+    editor.createShape({ id: arrowId, type: 'arrow', x: start.x, y: start.y })
+    editor.createBinding({
+      fromId: arrowId,
+      toId: fromId,
+      type: 'arrow',
+      props: { terminal: 'start' },
+    })
+    editor.createBinding({
+      fromId: arrowId,
+      toId,
+      type: 'arrow',
+      props: { terminal: 'end' },
+    })
+    if (label)
+      editor.updateShape({
+        id: arrowId,
+        type: 'arrow',
+        props: { richText: toRichText(label) },
+      })
+  })
 }
 
 function executeCommands(
@@ -98,44 +132,32 @@ function executeCommands(
         const fromId = labels.get(String(a.from_label ?? ''))
         const toId = labels.get(String(a.to_label ?? ''))
         if (!fromId || !toId) break
-        const arrowId = createShapeId()
-        const start = centerOf(editor, fromId)
-        editor.run(() => {
-          editor.createShape({ id: arrowId, type: 'arrow', x: start.x, y: start.y })
-          editor.createBinding({
-            fromId: arrowId,
-            toId: fromId,
-            type: 'arrow',
-            props: { terminal: 'start' },
-          })
-          editor.createBinding({
-            fromId: arrowId,
-            toId: toId,
-            type: 'arrow',
-            props: { terminal: 'end' },
-          })
-          if (typeof a.label === 'string' && a.label)
-            editor.updateShape({
-              id: arrowId,
-              type: 'arrow',
-              props: { richText: toRichText(a.label) },
-            })
-        })
+        createArrow(editor, fromId, toId, typeof a.label === 'string' ? a.label : undefined)
         break
       }
       case 'update_label': {
         const id = labels.get(label)
         const next = String(a.new_label ?? '')
         if (!id || !next) break
-        editor.updateShape({ id, type: 'geo', props: { richText: toRichText(next) } })
-        labels.delete(label)
-        labels.set(next, id)
+        const shape = editor.getShape(id)
+        if (!shape) break
+        if (shape.type === 'geo' || shape.type === 'note' || shape.type === 'text') {
+          editor.updateShape({
+            id,
+            type: shape.type,
+            props: { richText: toRichText(next) },
+          })
+          labels.delete(label)
+          labels.set(next, id)
+        }
         break
       }
       case 'move_node': {
         const id = labels.get(label)
         if (!id || typeof a.x !== 'number' || typeof a.y !== 'number') break
-        editor.updateShape({ id, type: 'geo', x: a.x, y: a.y })
+        const shape = editor.getShape(id)
+        if (!shape) break
+        editor.updateShape({ id, type: shape.type, x: a.x, y: a.y })
         break
       }
       case 'delete_nodes': {
@@ -204,6 +226,109 @@ function summarizeCanvas(editor: Editor): {
   return { text, ids }
 }
 
+// The agent emits structure (labels + edges), never positions. This runs
+// dagre's layered layout so diagrams come out clean instead of a coordinate
+// mess, then creates shapes staggered for the live-drawing feel.
+async function drawStructured(
+  editor: Editor,
+  commands: CanvasCommand[],
+  labels: LabelMap,
+) {
+  const nodeCmds = commands.filter(
+    ({ command }) =>
+      command === 'create_node' || command === 'create_note',
+  )
+  const edgeCmds = commands.filter(({ command }) => command === 'connect')
+  if (!nodeCmds.length && !edgeCmds.length) return
+
+  // Unique node refs in emission order.
+  const refs: string[] = []
+  const refKind = new Map<string, 'geo' | 'note'>()
+  const pushRef = (label: string, kind: 'geo' | 'note') => {
+    // Existing-canvas refs join the layout graph but are never re-created
+    // (guarded at creation time via labels.has).
+    if (!label || refs.includes(label)) return
+    refs.push(label)
+    refKind.set(label, kind)
+  }
+  for (const { command, arguments: a } of nodeCmds) {
+    const label =
+      command === 'create_note'
+        ? String(a.text ?? a.label ?? '')
+        : String(a.label ?? '')
+    pushRef(label, command === 'create_note' ? 'note' : 'geo')
+  }
+  for (const { arguments: a } of edgeCmds) {
+    pushRef(String(a.from_label ?? ''), 'geo')
+    pushRef(String(a.to_label ?? ''), 'geo')
+  }
+  if (!refs.length) return
+
+  const size = (ref: string) => {
+    const w = Math.min(240, Math.max(140, ref.length * 9 + 50))
+    return { width: w, height: refKind.get(ref) === 'note' ? 140 : 60 }
+  }
+
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 110 })
+  g.setDefaultEdgeLabel(() => ({}))
+  for (const ref of refs) g.setNode(ref, size(ref))
+  for (const { arguments: a } of edgeCmds) {
+    const from = String(a.from_label ?? '')
+    const to = String(a.to_label ?? '')
+    if (refs.includes(from) && refs.includes(to)) g.setEdge(from, to)
+  }
+  dagre.layout(g)
+
+  const anchor = editor.getViewportPageBounds()
+  const topLeft = new Map<string, { x: number; y: number }>()
+  for (const ref of refs) {
+    const n = g.node(ref)
+    topLeft.set(ref, {
+      x: anchor.x + 80 + (n.x - n.width / 2),
+      y: anchor.y + 80 + (n.y - n.height / 2),
+    })
+  }
+
+  // Staggered creation at final positions — keeps the live feel.
+  for (const ref of refs) {
+    if (labels.has(ref)) continue
+    const id = createShapeId()
+    const pos = topLeft.get(ref)!
+    if (refKind.get(ref) === 'note') {
+      editor.createShape({
+        id,
+        type: 'note',
+        x: pos.x,
+        y: pos.y,
+        props: { richText: toRichText(ref) },
+      })
+    } else {
+      editor.createShape({
+        id,
+        type: 'geo',
+        x: pos.x,
+        y: pos.y,
+        props: {
+          geo: 'rectangle',
+          w: size(ref).width,
+          h: 60,
+          richText: toRichText(ref),
+        },
+      })
+    }
+    labels.set(ref, id)
+    await sleep(70)
+  }
+  await sleep(100)
+  for (const { arguments: a } of edgeCmds) {
+    const fromId = labels.get(String(a.from_label ?? ''))
+    const toId = labels.get(String(a.to_label ?? ''))
+    if (fromId && toId) createArrow(editor, fromId, toId)
+    await sleep(60)
+  }
+}
+
 // Reads the backend's NDJSON stream, executing each canvas command the
 // instant it arrives so shapes appear live while the agent is still working.
 async function* ndjsonEvents(
@@ -219,10 +344,38 @@ async function* ndjsonEvents(
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
-      if (line.trim()) yield JSON.parse(line)
+      if (!line.trim()) continue
+      try {
+        const ev = JSON.parse(line)
+        // Some models stringify the arguments object — normalize.
+        if (typeof ev.arguments === 'string') {
+          try {
+            ev.arguments = JSON.parse(ev.arguments)
+          } catch {
+            ev.arguments = {}
+          }
+        }
+        yield ev
+      } catch {
+        // Skip malformed lines instead of killing the whole stream.
+      }
     }
   }
-  if (buffer.trim()) yield JSON.parse(buffer)
+  if (buffer.trim()) {
+    try {
+      const ev = JSON.parse(buffer)
+      if (typeof ev.arguments === 'string') {
+        try {
+          ev.arguments = JSON.parse(ev.arguments)
+        } catch {
+          ev.arguments = {}
+        }
+      }
+      yield ev
+    } catch {
+      // Ignore trailing garbage.
+    }
+  }
 }
 
 const FALLBACK_MODELS = [
@@ -288,16 +441,20 @@ export function AgentChatPanel({
     let reply = ''
     try {
       // Give the agent eyes: summarize the canvas and seed the executor's
-      // alias map so its commands can reference existing shapes.
+      // alias map so its commands can reference existing shapes. The map
+      // exists even for an EMPTY canvas — otherwise build commands would
+      // have nowhere to register new shape ids.
       let canvas: string | undefined
       const editor = editorRef.current
-      if (editor) {
+      const labels = editor
+        ? (labelsRef.current.get(activeId) ?? new Map())
+        : undefined
+      if (editor && labels) labelsRef.current.set(activeId, labels)
+      if (editor && labels) {
         const summary = summarizeCanvas(editor)
         if (summary) {
           canvas = summary.text
-          let labels = labelsRef.current.get(activeId) ?? new Map()
           for (const [alias, id] of summary.ids) labels.set(alias, id)
-          labelsRef.current.set(activeId, labels)
         }
       }
 
@@ -312,7 +469,6 @@ export function AgentChatPanel({
       })
       if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`)
 
-      const labels = editor ? labelsRef.current.get(activeId) : undefined
       // Anchor auto-placement to where the user is looking right now.
       const vp = editor?.getViewportPageBounds()
       const p = { col: 0, row: 0 }
@@ -322,20 +478,34 @@ export function AgentChatPanel({
       })
 
       let drew = 0
+      // Creates + connects are buffered and laid out as one graph at the end
+      // (dagre needs the full structure). Everything else runs immediately.
+      const structured: CanvasCommand[] = []
       for await (const ev of ndjsonEvents(res.body)) {
         if (ev.type === 'cmd' && editor && labels) {
-          executeCommands(
-            editor,
-            [{ command: ev.command!, arguments: ev.arguments ?? {} }],
-            labels,
-            place,
-          )
-          setProgress(`Drawing… ${++drew}`)
+          const cmd: CanvasCommand = {
+            command: ev.command!,
+            arguments: ev.arguments ?? {},
+          }
+          if (
+            cmd.command === 'create_node' ||
+            cmd.command === 'create_note' ||
+            cmd.command === 'connect'
+          ) {
+            structured.push(cmd)
+          } else {
+            executeCommands(editor, [cmd], labels, place)
+          }
+          setProgress(`Designing… ${++drew}`)
         } else if (ev.type === 'text') {
           reply = ev.response ?? ''
         }
       }
-      if (editor) {
+      if (editor && labels) {
+        if (structured.length) {
+          setProgress('Drawing…')
+          await drawStructured(editor, structured, labels)
+        }
         editor.selectNone()
         // Bring the new shapes into view if they landed outside it.
         if (drew > 0) editor.zoomToFit({ animation: { duration: 400 } })

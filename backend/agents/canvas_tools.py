@@ -25,14 +25,15 @@ def queue_canvas_command(command: str, arguments: dict) -> dict:
     """Queue one canvas command for the frontend to execute.
 
     Use `command` values:
-      - create_node: {"shape": "rectangle"|"ellipse", "label": str, "x"?: int, "y"?: int}
+      - create_node: {"shape": "rectangle"|"ellipse", "label": str}
       - create_text: {"text": str, "x"?: int, "y"?: int}
-      - create_note: {"text": str, "x"?: int, "y"?: int}
-      - connect: {"from_label": str, "to_label": str}
+      - create_note: {"text": str}
+      - connect: {"from_label": str, "to_label": str, "label"?: str}
       - update_label: {"label": str, "new_label": str}
       - move_node: {"label": str, "x": int, "y": int}
       - delete_nodes: {"labels": [str]}
     from_label/to_label/label may be an alias like "n2" from [CANVAS STATE].
-    x/y omitted = the frontend places it automatically.
+    Do NOT pass coordinates for creates — the client auto-layouts your graph
+    (dagre) from structure alone. x/y only matters for precise move_node.
     """
     return {"status": "queued", "command": command, "arguments": arguments}
