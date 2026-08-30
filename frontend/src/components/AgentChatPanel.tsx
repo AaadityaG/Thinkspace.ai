@@ -13,6 +13,7 @@ import {
 import dagre from 'dagre'
 import { Bot, MessageSquare, Send, Square, X } from 'lucide-react'
 
+import { API_URL } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/services/authApi'
@@ -574,7 +575,7 @@ export function AgentChatPanel({
   const [appendMessage] = useAppendMessageMutation()
 
   useEffect(() => {
-    fetch('/api/agents/models', { credentials: 'include' })
+    fetch(`${API_URL}/agents/models`, { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.models && setModels(d.models))
       .catch(() => {})
@@ -674,7 +675,7 @@ export function AgentChatPanel({
 
       const controller = new AbortController()
       abortRef.current = controller
-      const res = await fetch('/api/agents/chat', {
+      const res = await fetch(`${API_URL}/agents/chat`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

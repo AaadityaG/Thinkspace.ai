@@ -15,13 +15,15 @@ An infinite visual canvas (powered by [tldraw](https://tldraw.dev)) where you ca
 
 - [Python 3.12+](https://www.python.org/downloads/)
 - [Node.js 18+](https://nodejs.org/)
-- [MongoDB](https://www.mongodb.com/try/download/community) running locally (or a `MONGO_URI`)
+- [MongoDB](https://www.mongodb.com/try/download/community) running locally (or any `MONGO_DB` connection URI, e.g. from [MongoDB Atlas](https://www.mongodb.com/atlas))
 
 ---
 
 ## Setup
 
-### Backend
+### 1. Backend
+
+MongoDB must be running before you start the backend. If it can't connect, the API still boots but DB-backed endpoints (register, login, pages, chat history) will fail.
 
 ```bash
 cd backend
@@ -33,21 +35,37 @@ copy .env.example .env        # Windows
 # cp .env.example .env        # macOS/Linux
 ```
 
-Edit `.env`:
+Edit `backend/.env` — all variables:
 
-```
-MONGO_URI=mongodb://localhost:27017
-JWT_SECRET=<any-long-random-string>
-GOOGLE_API_KEY=<your key from https://aistudio.google.com/apikey>
-GEMINI_MODEL=gemini-3.6-flash
-```
+| Variable | Description | Example |
+|---|---|---|
+| `APP_NAME` | API name shown in docs | `Thinkspace.ai` |
+| `APP_VERSION` | Version string | `0.1.0` |
+| `DEBUG` | FastAPI debug flag | `true` |
+| `ALLOWED_ORIGINS` | CORS origins allowed to call the API (JSON array) | `["http://localhost:5173"]` |
+| `MONGO_DB` | MongoDB connection URI (required) | `mongodb://localhost:27017` |
+| `MONGO_DB_NAME` | Database name | `thinkspace` |
+| `JWT_SECRET` | Signing key for login/register tokens; generate with `openssl rand -hex 32` (required) | `c8ec...` |
+| `JWT_EXPIRE_DAYS` | Token lifetime in days | `7` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (only needed for "Continue with Google") | — |
+| `GOOGLE_API_KEY` | Gemini API key from https://aistudio.google.com/apikey (required for AI agents) | `AQ.AB8...` |
+| `GEMINI_MODEL` | Gemini model the agents use | `gemini-3.5-flash` |
 
-### Frontend
+### 2. Frontend
 
 ```bash
 cd frontend
 npm install
+copy .env.example .env        # Windows
+# cp .env.example .env        # macOS/Linux
 ```
+
+Edit `frontend/.env`:
+
+| Variable | Description | Example |
+|---|---|---|
+| `VITE_GOOGLE_CLIENT_ID` | Same Google OAuth client ID as the backend (used by the Google login button; leave empty to disable it). Must match the backend's `GOOGLE_CLIENT_ID` when enabled | — |
+| `VITE_API_URL` | Backend base URL for API calls. **Set this (e.g. `http://localhost:8008`) while running the backend and frontend together** — all requests go straight to the backend. Leave it empty to fall back to Vite's `http://localhost:8008` dev-server proxy on `/api` instead | `http://localhost:8008` |
 
 ---
 
@@ -61,8 +79,6 @@ cd backend
 .venv\Scripts\activate
 uvicorn main:app --reload --port 8008
 ```
-
-> The backend must run on port **8008** — the frontend dev server proxies `/api` there.
 
 **Terminal 2 — Frontend**
 ```bash
