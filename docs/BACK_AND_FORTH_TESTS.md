@@ -1,161 +1,116 @@
-# Thinkspace.ai — Back-and-Forth Testing Scenarios
+# Thinkspace.ai — Demo Scenarios
 
-Multi-turn conversations that exercise the **whole system in one sitting** —
-canvas understanding, drawing, editing, thread memory, model switching, and
-error paths — in realistic back-and-forth exchanges.
+Scripted demos of the **single collaborative agent** on the shared canvas. The
+agent reads what's on the canvas, draws clean flowchart-style diagrams with
+deliberate shapes and colors, and edits / redesigns what exists.
 
-Run each scenario start to finish in order. At the end you'll have touched
-every layer: auth → workspace → canvas → agent chat → streaming draw →
-edit → persist → reload.
+- **Scenario 1 (primary / money path)** — think → visualize → understand →
+  edit → persist. The safe, polished demo.
+- **Scenario 2 (crazy demo)** — show-off path for a crowd.
+- **Scenario 3 (deep build) — `"MotoDash" ride-hailing & food delivery`** — a
+  single long-running session that grows a whole startup's system architecture
+  from a rough brainstorm to a complex, color-coded, failure-hardened diagram
+  through many connected steps. **Best standalone demo.**
 
-> Pair with `TESTING.md` for the single-command checklist. These scenarios are
-> the conversational version of that checklist.
-
----
-
-## What changed in this stage (multi-agent + routing)
-
-Previous stage had **one** orchestrator agent with only canvas tools. This
-stage splits it into three routed agents:
-
-| Agent | Tools | Handles |
-|-------|-------|---------|
-| **orchestrator** (`root_agent`) | `AgentTool(canvas_agent)`, `AgentTool(research_agent)` | Decides which specialist (or neither) to involve; answers casual chat directly |
-| **canvas_agent** (new specialist) | `queue_canvas_command` | Draw / design / edit / visualize |
-| **research_agent** (new specialist) | `web_search` (Wikipedia, keyless) | Real researched/sourced answers |
-
-Two behavior changes to test:
-
-1. **Live routing indicator** — runner now emits a new `routing` event; the
-   panel shows a pill "**Canvas agent working…**" or "**Research agent
-   working…**" while the matching specialist stream. See
-   `backend/agents/runner.py` + `AgentChatPanel.tsx`.
-2. **Research is real now** — `web_search` hits the Wikipedia API (no key
-   needed). Research requests return actual titled source+link results instead
-   of the model paraphrasing.
-
-Also: the partner panel now only renders when a workspace exists
-(suppressed on the empty/no-workspace shell — `Workspace.tsx`).
-
-**Watch for the big regression risk:** orchestrator routing can misfire — a
-"draw this" request routed to research (or vice versa), a combined
-"research then draw" dropping the draw half, or research being skipped in
-favor of a hallucinated answer. Table rows are tagged with the expected route:
-**`[C]` = canvas_agent · `[R]` = research_agent · `[D]` = answered directly
-(no specialist)** — so you can confirm each request hit the right agent.
+Run from a fresh workspace. Pair with `TESTING.md` for the automated + manual
+checklist.
 
 ---
 
-## New routing checks (add to every scenario pass)
+## Scenario 1 — "Design a secure auth system"
 
-- [ ] Exact indicator shown per route:
-  - **[R]** prompt → "Research agent working…" pill, then sources
-  - **[C]** prompt → "Canvas agent working…" pill, then shapes appear
-  - **[D]** chat → NO pill, plain answer, canvas untouched
-- [ ] Combined request ("research, then draw") → pill appears **twice**
-  (research then canvas), and BOTH sources AND the diagram arrive
-- [ ] Indicator resets after each message; never sticks from the previous turn
+The whole flow in one sitting: plan, draw, question the diagram, refine it,
+persist, then recall it from memory.
 
----
+| # | User says / does | What should happen | Verifies |
+|---|------------------|--------------------|----------|
+| 1 | *(fresh workspace)* `Design a secure authentication system for my app` | Agent draws a clean flowchart: `User` (ellipse/actor) → `Frontend` → `Auth API` (rectangles/process), splitting to `Identity Provider` + `Session Store`; diamonds/decisions and a color grouping where they add meaning. Auto-zoom. | Guided visualize → structured, visually designed layout |
+| 2 | *(select the `Auth API` node)* `Is this node we drew actually secure?` | Agent resolves "this" = the selected/existing shape and answers from the canvas, not a fresh guess | Canvas awareness / selection context |
+| 3 | `What's missing here?` | Identifies a real gap (e.g. rate limiting / MFA) by name, referencing existing labels | Canvas understanding by label |
+| 4 | `Add a rate limiter between Auth API and the database` | New node lands between them, connected both ways | create + connect layout (alias math) |
+| 5 | `Rename Auth API to Gateway` | Your existing shape relabels in place; nothing redrawn | update_label / alias map |
+| 6 | *(wait ~2s, reload page)* | Everything from steps 1–5 persists; same workspace selected | Autosave / persistence |
+| 7 | `What did we build when we started?` | Recalls the whole thread (diagram + edits) from memory, no re-draw | Session memory across turns |
+| 8 | `Draw decision nodes for each security check and color the risky ones red` | Adds/updates diamond decision nodes; risky checks get `red`/`light-red` color + `solid` fill | Shape vocabulary + color-for-meaning |
 
-## Scenario 1 — "Design a secure auth system" (primary demo path)
-
-Drives the MVP demo script end to end: research → visualize → understand →
-edit → persist. This is the money scenario.
-
-| Route | # | User says | What should happen | Verifies |
-|-------|---|-----------|--------------------|----------|
-| [D] | 1 | *(fresh workspace)* `Design a secure authentication system for my app` | Agent replies conversationally; offers to research and/or visualize. No canvas changes yet. **No routing pill** | Orchestrator routing (neither specialist fired) |
-| [R] | 2 | `Research current best practices` | **"Research agent working…"** pill, then real Wikipedia sources with titled links + snippets (e.g. authentication; OWASP-adjacent) | Researcher + real web_search |
-| [C] | 3 | `Now visualize it` | **"Canvas agent working…"** pill, then Dagre diagram: User → Frontend → Auth API → split to Identity Provider + Session Store; arrows, zoomToFit | Structured drawing (dagre) + route switch |
-| [C] | 4 | *(select the `Auth API` node)* `Is this node we drew actually secure?` | Agent resolves "this" = the selected/existing shape, not a fresh answer | Canvas awareness / selection context |
-| [C] | 5 | `What's missing here?` | Identifies real gap (rate limiting / MFA) by name referencing existing labels | Canvas understanding by label |
-| [C] | 6 | `Add a rate limiter between Auth API and the database` | New node lands BETWEEN them, connected both ways | create + connect layout (alias math) |
-| [C] | 7 | `Rename Auth API to Gateway` | Your existing shape relabels in place, nothing redrawn | update_label / alias map |
-| — | 8 | *(wait ~2s, reload page)* | Everything from steps 2–7 persists; same workspace selected | Autosave/persistence |
-| [R] | 9 | `What did we build when we started?` | Recalls the whole thread (research → diagram → edits) from memory, NOT from a fresh research call | Session memory across specialists / thread isolation |
-| [C] | 10 | *(draw a freehand circle, select it)* `Critique this doodle as a security diagram` | Responds about the selected object, no canvas mutation | Selection-aware AI, human-stays-in-control |
-
-> New-critical: step 9 is a **regression trap**. Under the old single-aggregator
-> model this answered from thread memory. Now the orchestrator must recall the
-> earlier research instead of re-running `web_search`. A repeated "Research agent
-> working…" pill on this step = wrong memory behavior.
-
-**Pass = all 10 steps behave; every routing pill matches its route marker. Any
-silent no-op, wrong-agent route, or "can't see" failure = bug.**
-
-### 1a. Combined "research then draw" (multi-agent bridge)
-Add after step 3, on a fresh area:
-| Route | User says | What should happen | Verifies |
-|-------|-----------|--------------------|----------|
-| [R→C] | `Research load balancers, then draw a diagram of them behind the gateway` | Pill shows **"Research agent working…"**, sources stream; then pill **switches to "Canvas agent working…"**, diagram draws. BOTH are delivered | Orchestrator runs two specialists in one turn, in order; pill switches; nothing dropped |
+**Pass = all 8 steps behave: shapes draw cleanly with appropriate geo types
+and colors, edits land on the right nodes, the page reloads intact, and the
+agent recalls context without redrawing. Any silent no-op or "can't see it"
+failure = bug.**
 
 ---
 
-## Scenario 2 — "Debug why my backend is slow" (iterative refine loop)
+## Scenario 2 — "Crazy demo" (show-off path)
 
-Exercises incremental editing across many turns — the "collaborator, not
-chatbot" feel. Tests mixed command routing under pressure and a Stop.
+The fun one for a crowd. Shows the partner building a rich, color-coded,
+well-laid-out system diagram and redesigning it live.
 
-| Route | # | User says | What should happen | Verifies |
-|-------|---|-----------|--------------------|----------|
-| [C] | 1 | `draw my current API: User hits a single gateway that calls a monolith` | 3 clean nodes: User → Gateway → Monolith. **"Canvas agent working…"** pill | Basic drawing |
-| [C] | 2 | `the monolith is the bottleneck. split it into users, orders, and payments services` | Splits one node into three, reconnects Gateway → each | Edit-existing + batch create |
-| [C] | 3 | `put a message queue between Gateway and orders` | Inserts Queue node between Gateway and Orders, both ways connected | Insert-in-the-middle routing |
-| [C] | 4 | `rename orders service to order-service` | In-place relabel | update_label |
-| [C] | 5 | *(select just `payments`)* `make this one a separate deployable that can retry` | Treats ONLY the selected node; adds retry note off it | Selection-scoped edit |
-| [C] | 6 | `connect payments to a dead-letter queue and to queue` | Legacy/new naming — must still find `payments` and `queue` | Alias/label resolution |
-| [C] | 7 | `now delete the dead-letter queue and draw a chart tier on top showing what scales first` | Delete + create in ONE turn (mixed routing): delete applies live, new arrives after | Mixed command routing |
-| [C] | 8 | *(on the combined turn)* Let it print `Designing…` then click **Stop** | Halts instantly, partial shapes stay, "(stopped)" marker, input re-enabled; pill clears | Stop button + pill reset |
-| [D] | 9 | *(switch model in the header)* `did we end up with a retry on payments?` | Recalls thread, answers about `payments` retry note from earlier. **No pill** | Memory across model switch + no wrong route |
-| [D] | 10 | `summarize this whole design in 3 bullet points` | Pure-text summary; leaves canvas untouched. **No pill** | Orchestration knows when NOT to draw |
+| # | User says / does | What should happen | Verifies |
+|---|------------------|--------------------|----------|
+| 1 | `Map the full flow of ordering a pizza, using the right shapes: diamonds for decisions, an oval for the customer, a cloud for the delivery service` | Agent builds a complete flowchart: Customer (oval) → Menu → `Hungry?` (diamond) → Place Order (rect) → Payment (rect), and `Delivery Service` as a cloud; logical arrows, clean ranks | Broad geo vocabulary honored end to end |
+| 2 | `Make the unhappy path stand out: color anything that can fail red and mark the payment-as-pending step dashed` | Failure-prone nodes tinted `red`, pending/async edges drawn `dashed` | Color + dash communicate risk |
+| 3 | `Where's the biggest risk in this flow?` | Picks a real node (e.g. Payment) referencing its label + color | Canvas awareness (label + color) |
+| 4 | *select the Customer oval* `turn this into a rectangle and connect it straight to Place Order` | Selected oval relabels shape type to rectangle and reconnects | (Optional) selection-aware type edit if supported, else honest limit |
+| 5 | `We're now a drone delivery startup. Redesign the flow for that ` | Rebuilds the diagram around drones: Drone Fleet (hexagon/cloud), FAA Approval (diamond), dispatch, landing; keeps a consistent palette | Creative redesign + memory + consistent visual language |
+| 6 | `in 3 bullets why would this fail?` | Pure-text critique; canvas untouched | Orchestrator knows when NOT to draw |
+| 7 | *(wait ~2s, reload)* `What were we just building?` | Split diagram persisted; agent recalls the whole thread | Persistence + session memory |
 
-**Pass = every modify lands on the RIGHT node (label resolution) and edits
-survive the Stop + model switch.**
+**Pass = diagrams use deliberate shapes (diamond decision, oval actor, cloud
+external) and a consistent color palette, edits hit the right nodes, and the
+agent stays creative yet coherent across a full redesign.**
 
 ---
 
-## Scenario 3 — "Onboarding flow & errors" (happy + break it)
+## Scenario 3 — "MotoDash" (deep build)
 
-Tests signup, workspace lifecycle, thread isolation, and every error path —
-the "does anything actually break" scenario. Best run on a **second workspace**
-to prove isolation.
+The longest, most complex demo: one sitting grows a ride-hailing + food
+delivery marketplace from a loose brainstorm into a hardened, color-coded
+system architecture. Every step builds on the last, ratcheting up shape +
+color vocabulary, canvas awareness, editing, and failure modeling.
 
-| Route | # | User says / does | What should happen | Verifies |
-|-------|---|------------------|--------------------|----------|
-| — | 1 | *(register new account, log in)* | Redirects to dashboard, protected calls auth'd | Auth flow |
-| — | 2 | *(sidebar "+ New" → "Company Onboarding")* | Workspace created, URL has new id; **partner panel appears** | Workspace CRUD + panel-gated-on-workspace |
-| [C] | 3 | `plan an onboarding flow for a SaaS` | **"Canvas agent working…"** pill; Dagre diagram of onboarding stages | Drawing on this workspace |
-| [R] | 4 | *(switch to the earlier Scenario-1 workspace, ask)* `what was in the auth research you did?` | Recalls AUTH research — NOT onboarding. Independent thread/memory per workspace. **Research pill only if it actually searches** | Thread isolation of memory (research recall) |
-| [C] | 5 | *(switch back to onboarding)* `add a step for payment before the email step` | Inserts node before the correct existing node in THIS thread | Isolation + insert |
-| — | 6 | *(exhaust a model's quota / pick an overloaded one)* `anything` | Friendly rate-limit or overload bubble — never a stack trace / stuck spinner; stream stays alive | Error path mitigation |
-| [D] | 7 | *(after the bubble, switch model)* `where were we?` | Recovers context, continues the onboarding thread. **No pill** | Graceful recovery + memory |
-| [C] | 8 | `draw 50 nodes of everything in my factory` | Agent caps (~10) or pushes back; never hangs the tab | Overreach guard |
-| [D] | 9 | `asdfgh` | Graceful clarification, zero canvas commands. **No pill, no shapes** | No-cmd fallback |
-| — | 10 | *(delete this workspace card)* | Card removed; if it was active, view falls back cleanly, never blank-crashes. If no workspaces remain, **panel hides** | Workspace delete + fallback + panel gate |
+| # | User says / does | What should happen | Verifies |
+|---|------------------|--------------------|----------|
+| 1 | `Let's design a food delivery + ride-hailing startup called MotoDash. Show the core flow: a Customer can order food or book a ride, both go to a Driver, and payment happens third-party.` | Agent draws a clean core flow: `Customer` **ellipse** → `Book Food` + `Book Ride` (rectangles) → both to a `Driver` **hexagon** (shared service) → `Payment` **cloud** (external/stripe). Decisions where branching happens. Color-forward layout (blue core flow). | Rich single diagram from one prompt: actors, branches, shared service, external SaaS + consistent palette |
+| 2 | `Where do the orders and rides get stored? Add the data stores.` | Adds `Order Store` and `Ride Store` as **trapezoids** (data stores) feeding off the book steps; connected. | Shape vocabulary grows on demand (trapezoid = data store) |
+| 3 | `Now a courier joins mid-route: when a driver accepts, show the decision whether to reassign if the order is late.` | Inserts a `Late?` **diamond** decision after driver acceptance, branching to `Reassign` (rectangle) or `Continue`; connected both ways into existing layout. | Insert-in-the-middle + decision node |
+| 4 | `Color the happy path green end-to-end and the failure paths red, and mark any slow weekly payroll as a pentagon.` | Recolors the success/processing flow `green`/`light-green`, the reject/failure edges `red`, and the weekly payout step becomes a **pentagon** (batch/slow); dashed for async. | Color-for-meaning across many nodes + pentagon batch shape |
+| 5 | *select a node on the happy path* `route around this if it goes down` | Agent targets the exact selected node, draws a **triangle** (warning) + `Requeue` fallback arrow, and a dashed bypass to `Dead Letter` **cloud** | Selection-aware + triangle-as-warning + graceful degradation edit |
+| 6 | `Add a fraud check when a new customer pays: if risk is high, block; if medium, hold for review.` | Inserts `Fraud Check` **diamond** with three outgoing branches — `Block` (`red`), `Hold Review` (`yellow`), `Approve` (`green`) — and a `Review Queue` **trapezoid**. The three branch arrows are **labelled** `high` / `medium` / `low` (routing), while linear flow edges stay unlabeled. | Multi-branch diamond + three-tier color risk palette + balanced edge labels |
+| 7 | `What's the most fragile part of this system right now?` | Picks a real node (e.g. the single Driver/hexagon or Payment cloud), names it by label + color, proposes a mitigation | Canvas awareness (label + color + shape semantics) |
+| 7a | `Actually, re-route it: let rides bypass the Driver shared service and go straight to Payment.` | Topology changes — the old `Book Ride → Driver` arrow is removed or replaced, no duplicate/orphan arrow remains; only the intended `Book Ride → Payment` link persists | Arrow cleanup on re-route |
+| 7b | *(manually delete one node's arrow endpoint on the canvas, wait for the next turn)* | The now-single-ended / dangling arrow is swept away; no floating line remains pointing at nothing | Prune of pointless (one-ended/missing-endpoint) arrows |
+| 8 | `Rename the fraud review queue to manual-review and add a note explaining why we hold high-value orders.` | In-place relabel + a `create_note` annotation pinned to the trapzoid | update_label + note annotation |
+| 9 | `We're expanding to 3 cities. Show the regional split with dashed failover arrows and a note on which region fails over where.` | Dashed failover edges + `create_note` for region failover; keeps the palette consistent; no over-crowding | Dashed async/failover styling + notes + restraint |
+| 10 | `This is getting big — shrink to just the payment + delivery spine and drop the fraud internals.` | **Deletes** the fraud/region internals via delete_nodes, collapse to the core spine, keeps arrows coherent — **no orphaned arrows left hanging off removed nodes, no duplicate connections** | Delete + simplify + remember what to keep + arrow cleanup |
+| 11 | *(wait ~2s, reload)* `What did MotoDash end up looking like and what was its biggest risk?` | Full architecture persists; agent recalls the thread, summarizes the final diagram + names the risk from earlier | Persistence + long-horizon session memory |
+| 12 | `In 4 bullet points, what would kill this company first?` | Pure-text critique, canvas untouched | Orchestrator knows when NOT to draw |
 
-> New in this stage: step 4 — research memory must also be per-workspace
-> (the auth research from Scenario 1 must not leak into onboarding, and the
-> orchestrator must NOT re-search on this step if the thread already has it).
-
-**Pass = nothing ever 500s, blanks, or hangs; two workspaces never bleed
-context into each other.**
+**Pass = one continuous session grows a complex, readable, color-coded
+architecture; shape+color always carry meaning; edits target the right nodes;
+delete/simplify works with no leftover arrows; every turn can reference the
+prior turns' labels. Any silent no-op, lost-edge, or "can't see it" failure =
+bug.**
 
 ---
 
-## Final sweep checklist
+## Quick sanity prompts (before the demo)
 
-- [ ] Reload mid/post-scenario → canvas + chat persist, same workspace selected
-- [ ] Workspaces stay context-isolated — **including research memory** (Scenario 3 step 4)
-- [ ] All error paths show friendly bubbles, not stack traces
-- [ ] Stop button never leaves the input stuck
-- [ ] Canvas edits are editable by hand (never locked images)
-- [ ] Routing pill appears exactly for the executing specialist and clears after each turn
-- [ ] Research returns titled source+URL results (never a made-up answer)
-- [ ] Partner panel hidden when zero workspaces exist
+| Prompt | Expect |
+|--------|--------|
+| `hi` | Text-only reply, zero canvas commands |
+| `what can you see on my canvas right now?` | Correct empty-canvas answer on a fresh workspace; lists shapes with kind + color + label on a populated one |
 
-## Known caveats (not bugs)
+## Stop button (optional)
 
-- Free tier ~20 req/day/model; multi-agent turns cost 6–10 calls — Scenario 3
-  step 6 may just hit the real quota limit, which IS the friendly bubble test.
-- Scenarios burn quota; run Scenario 1 (the demo) on a banked-up day.
+Send a long build prompt (e.g. `design a full e-commerce system with users,
+catalog, cart, payments, shipping, reviews and admin`), click red **Stop**
+mid-stream → halts instantly, partial shapes stay, input re-enabled immediately.
+
+## Known constraints (not bugs)
+
+- Free tier ~20 req/day/model; a demo turn costs a few calls — run the demo on a
+  day with quota banked.
+- Model picker in the header survives reload (localStorage); switching models
+  keeps session memory.
+- The agent only reports shapes it can label (rect/ellipse/diamond/note/text);
+  raw freehand strokes and images aren't returned in canvas state.

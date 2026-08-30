@@ -25,7 +25,7 @@ const proof = [
 export default function Landing() {
   return (
     <ShaderBackground className="min-h-svh bg-[#0a0914] text-white">
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-0 opacity-40">
+      <div aria-hidden className="pointer-events-none absolute inset-0 z-0 opacity-80">
         <RedBlackShader className="h-full w-full" />
       </div>
       <header className="relative z-10 flex items-center justify-between p-6 sm:px-10">
@@ -33,7 +33,7 @@ export default function Landing() {
           <span className="flex size-7 items-center justify-center rounded-lg bg-violet-500/20 text-indigo-200 ring-1 ring-inset ring-white/15">
             <span className="text-sm font-black leading-none">T</span>
           </span>
-          <span className="text-sm font-semibold tracking-tight">Thinkspace</span>
+          <span className="text-xl font-semibold tracking-tight">Thinkspace.ai</span>
         </a>
 
        

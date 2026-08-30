@@ -48,6 +48,13 @@ const VALID_STYLES = {
   size: ['s', 'm', 'l', 'xl'],
 } as const
 
+// Curated geo shapes the agent may ask for. Kept to the ones that read well
+// in a flowchart so a sloppy model call can't produce a mess.
+const VALID_GEO = [
+  'rectangle', 'ellipse', 'diamond', 'triangle', 'pentagon', 'hexagon',
+  'cloud', 'trapezoid', 'oval', 'x-box', 'check-box', 'star', 'arrow-right',
+] as const
+
 // Curated style props the agent may attach to a shape. Unknown or invalid
 // values are dropped so a sloppy model call can't corrupt the canvas.
 function styleOf(a: Record<string, unknown>): Partial<TLGeoShape['props']> {
@@ -62,6 +69,17 @@ function styleOf(a: Record<string, unknown>): Partial<TLGeoShape['props']> {
     }
   }
   return out
+}
+
+// Map a model-supplied shape name to a valid tldraw geo. Falls back to
+// rectangle so a bad value never breaks the layout.
+function geoOf(a: Record<string, unknown>): TLGeoShape['props']['geo'] {
+  const v = typeof a.shape === 'string' ? a.shape.toLowerCase() : ''
+  return (
+    (VALID_GEO as readonly string[]).includes(v)
+      ? (v as TLGeoShape['props']['geo'])
+      : 'rectangle'
+  )
 }
 
 interface Msg {
@@ -82,12 +100,27 @@ function centerOf(editor: Editor, id: TLShapeId) {
   return { x: bounds?.midX ?? 0, y: bounds?.midY ?? 0 }
 }
 
+function existingArrow(editor: Editor, fromId: TLShapeId, toId: TLShapeId) {
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (shape.type !== 'arrow') continue
+    const bindings = editor.getBindingsFromShape(shape.id, 'arrow')
+    const start = bindings.find((b) => b.props.terminal === 'start')?.toId
+    const end = bindings.find((b) => b.props.terminal === 'end')?.toId
+    if (start === fromId && end === toId) return shape.id
+  }
+  return undefined
+}
+
 function createArrow(
   editor: Editor,
   fromId: TLShapeId,
   toId: TLShapeId,
   label?: string,
 ) {
+  // Replacing this architecture shouldn't stack duplicate arrows: if that
+  // connection already exists, drop the old one first.
+  const existing = existingArrow(editor, fromId, toId)
+  if (existing) editor.deleteShape(existing)
   const arrowId = createShapeId()
   const start = centerOf(editor, fromId)
   editor.run(() => {
@@ -111,6 +144,37 @@ function createArrow(
         props: { richText: toRichText(label) },
       })
   })
+}
+
+// Delete shapes together with every arrow bound to them, so removing an
+// obsolete node during a redesign doesn't leave orphaned arrows behind.
+function deleteWithArrows(editor: Editor, ids: TLShapeId[]) {
+  const idSet = new Set(ids)
+  const arrowIds: TLShapeId[] = []
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (shape.type !== 'arrow') continue
+    const bindings = editor.getBindingsFromShape(shape.id, 'arrow')
+    if (bindings.some((b) => idSet.has(b.toId))) arrowIds.push(shape.id)
+  }
+  editor.deleteShapes([...ids, ...arrowIds])
+}
+
+// Remove arrows that serve no purpose: bound at only one end (start XOR end),
+// to a shape that no longer exists, or a self-loop. These are the floating /
+// dangling lines that appear when a bound node is deleted or a connect
+// half-fails. Runs after every turn so the canvas never accumulates them.
+function prunePointlessArrows(editor: Editor) {
+  const remove: TLShapeId[] = []
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (shape.type !== 'arrow') continue
+    const bindings = editor.getBindingsFromShape(shape.id, 'arrow')
+    const start = bindings.find((b) => b.props.terminal === 'start')?.toId
+    const end = bindings.find((b) => b.props.terminal === 'end')?.toId
+    const alive = (id: TLShapeId | undefined) =>
+      Boolean(id) && Boolean(editor.getShape(id as TLShapeId))
+    if (!alive(start) || !alive(end) || start === end) remove.push(shape.id)
+  }
+  if (remove.length) editor.deleteShapes(remove)
 }
 
 function executeCommands(
@@ -158,7 +222,7 @@ function executeCommands(
                 x,
                 y,
                 props: {
-                  geo: a.shape === 'ellipse' ? 'ellipse' : 'rectangle',
+                  geo: geoOf(a),
                   w: typeof a.width === 'number' ? a.width : 180,
                   h: typeof a.height === 'number' ? a.height : 60,
                   richText: toRichText(text),
@@ -226,7 +290,7 @@ function executeCommands(
           .map((l) => labels.get(String(l)))
           .filter((id): id is TLShapeId => Boolean(id))
         if (ids.length) {
-          editor.deleteShapes(ids)
+          deleteWithArrows(editor, ids)
           for (const l of a.labels as string[]) labels.delete(l)
         }
         break
@@ -262,8 +326,20 @@ function summarizeCanvas(editor: Editor): {
     ids.set(alias, shape.id)
     if (label) ids.set(label, shape.id)
     const pos = `at (${Math.round(shape.x)},${Math.round(shape.y)})`
+    // Describe the visual: for geo shapes report the actual kind (diamond /
+    // ellipse / ...) and color so the agent understands the diagram's look.
+    let kind: string = shape.type
+    let color = ''
+    if (shape.type === 'geo') {
+      kind = (shape.props as { geo?: string }).geo ?? 'rectangle'
+      color = (shape.props as { color?: string }).color ?? 'black'
+    } else if (shape.type === 'note') {
+      color = (shape.props as { color?: string }).color ?? 'black'
+    }
     lines.push(
-      `${alias} ${shape.type}${label ? ` "${label}"` : ''} ${pos}`,
+      `${alias} ${kind}${color && color !== 'black' ? ` ${color}` : ``}${
+        label ? ` "${label}"` : ''
+      } ${pos}`,
     )
   }
   if (!lines.length) return null
@@ -304,13 +380,20 @@ async function drawStructured(
   // Unique node refs in emission order.
   const refs: string[] = []
   const refKind = new Map<string, 'geo' | 'note'>()
+  const refGeo = new Map<string, TLGeoShape['props']['geo']>()
   const refStyle = new Map<string, Partial<TLGeoShape['props']>>()
-  const pushRef = (label: string, kind: 'geo' | 'note', style = {}) => {
+  const pushRef = (
+    label: string,
+    kind: 'geo' | 'note',
+    geo: TLGeoShape['props']['geo'],
+    style = {},
+  ) => {
     // Existing-canvas refs join the layout graph but are never re-created
     // (guarded at creation time via labels.has).
     if (!label || refs.includes(label)) return
     refs.push(label)
     refKind.set(label, kind)
+    refGeo.set(label, geo)
     refStyle.set(label, style)
   }
   for (const { command, arguments: a } of nodeCmds) {
@@ -318,17 +401,28 @@ async function drawStructured(
       command === 'create_note'
         ? String(a.text ?? a.label ?? '')
         : String(a.label ?? '')
-    pushRef(label, command === 'create_note' ? 'note' : 'geo', styleOf(a))
+    pushRef(
+      label,
+      command === 'create_note' ? 'note' : 'geo',
+      geoOf(a),
+      styleOf(a),
+    )
   }
   for (const { arguments: a } of edgeCmds) {
-    pushRef(String(a.from_label ?? ''), 'geo')
-    pushRef(String(a.to_label ?? ''), 'geo')
+    pushRef(String(a.from_label ?? ''), 'geo', 'rectangle')
+    pushRef(String(a.to_label ?? ''), 'geo', 'rectangle')
   }
   if (!refs.length) return
 
   const size = (ref: string) => {
-    const w = Math.min(240, Math.max(140, ref.length * 9 + 50))
-    return { width: w, height: refKind.get(ref) === 'note' ? 140 : 60 }
+    const isNote = refKind.get(ref) === 'note'
+    const geo = refGeo.get(ref)
+    // Diamonds/triangles need a wider box to fit text; notes are taller.
+    const wide = geo === 'diamond' || geo === 'triangle' || geo === 'pentagon'
+    const w = wide
+      ? Math.min(280, Math.max(180, ref.length * 8 + 60))
+      : Math.min(240, Math.max(140, ref.length * 9 + 50))
+    return { width: w, height: isNote ? 140 : 60 }
   }
 
   const g = new dagre.graphlib.Graph()
@@ -376,7 +470,7 @@ async function drawStructured(
         x: pos.x,
         y: pos.y,
         props: {
-          geo: 'rectangle',
+          geo: refGeo.get(ref) ?? 'rectangle',
           w: size(ref).width,
           h: 60,
           richText: toRichText(ref),
@@ -391,7 +485,13 @@ async function drawStructured(
   for (const { arguments: a } of edgeCmds) {
     const fromId = labels.get(String(a.from_label ?? ''))
     const toId = labels.get(String(a.to_label ?? ''))
-    if (fromId && toId) createArrow(editor, fromId, toId)
+    if (fromId && toId)
+      createArrow(
+        editor,
+        fromId,
+        toId,
+        typeof a.label === 'string' ? a.label : undefined,
+      )
     await sleep(60)
   }
 }
@@ -510,10 +610,11 @@ export function AgentChatPanel({
     if (activeId) threadsRef.current.set(activeId, msgs)
   }
 
-  // Reset auto-placement grid when switching workspaces.
+  // Auto-scroll the chat box to the newest message whenever one is added
+  // (user send, agent reply) or the active workspace changes.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [activeId])
+  }, [thread.length, activeId])
 
   const stop = () => abortRef.current?.abort()
 
@@ -619,6 +720,9 @@ export function AgentChatPanel({
           setProgress('Drawing…')
           await drawStructured(editor, structured, labels)
         }
+        // Drop dangling / single-ended / pointless arrows left over from
+        // edits so the canvas only keeps real connections.
+        prunePointlessArrows(editor)
         editor.selectNone()
         // Bring the new shapes into view if they landed outside it.
         if (drew > 0) editor.zoomToFit({ animation: { duration: 400 } })

@@ -42,7 +42,7 @@ export default function Dashboard() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
+      <div className="flex w-full flex-col gap-8">
         {/* Hero */}
         <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-8">
           <p className="text-sm font-medium text-primary">Thinkspace.ai</p>

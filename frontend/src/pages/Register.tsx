@@ -38,7 +38,17 @@ export default function Register() {
   }
 
   return (
-    <div className="bg-background text-foreground flex min-h-svh flex-col items-center justify-center p-8">
+    <div className="bg-background text-foreground relative flex min-h-svh flex-col items-center justify-center p-8">
+      <Link
+        to="/"
+        className="absolute top-4 left-4 flex w-fit items-center gap-2 rounded-lg"
+        aria-label="Go to homepage"
+      >
+        <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
+          T
+        </span>
+        <span className="text-lg font-semibold">Thinkspace.ai</span>
+      </Link>
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold tracking-tight">
